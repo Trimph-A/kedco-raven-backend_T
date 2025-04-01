@@ -8,14 +8,14 @@ class UUIDModel(models.Model):
         abstract = True
 
 
-class State(models.Model):
+class State(UUIDModel, models.Model):
     name = models.CharField(max_length=100, unique=True)
 
     def __str__(self):
         return self.name
 
 
-class BusinessDistrict(models.Model):
+class BusinessDistrict(UUIDModel, models.Model):
     name = models.CharField(max_length=100)
     state = models.ForeignKey(State, on_delete=models.CASCADE, related_name='districts')
 
@@ -26,7 +26,7 @@ class BusinessDistrict(models.Model):
         return f"{self.name} ({self.state.name})"
 
 
-class InjectionSubstation(models.Model):
+class InjectionSubstation(UUIDModel, models.Model):
     name = models.CharField(max_length=100)
     district = models.ForeignKey(BusinessDistrict, on_delete=models.CASCADE, related_name='substations')
 
@@ -37,7 +37,7 @@ class InjectionSubstation(models.Model):
         return f"{self.name} - {self.district}"
 
 
-class Feeder(models.Model):
+class Feeder(UUIDModel, models.Model):
     name = models.CharField(max_length=100)
     substation = models.ForeignKey(InjectionSubstation, on_delete=models.CASCADE, related_name='feeders')
 
@@ -48,7 +48,7 @@ class Feeder(models.Model):
         return f"{self.name} - {self.substation}"
 
 
-class DistributionTransformer(models.Model):
+class DistributionTransformer(UUIDModel, models.Model):
     name = models.CharField(max_length=100)
     feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE, related_name='transformers')
 
@@ -60,7 +60,7 @@ class DistributionTransformer(models.Model):
 
 
 # Optional: Prepare for banding
-class Band(models.Model):
+class Band(UUIDModel, models.Model):
     name = models.CharField(max_length=50, unique=True)  # e.g., Band A, Band B
     description = models.TextField(blank=True)
 
