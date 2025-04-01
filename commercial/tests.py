@@ -2,6 +2,7 @@ import pytest
 from datetime import date
 from common.models import *
 from commercial.models import *
+from django.db.models import Sum
 
 @pytest.mark.django_db
 def test_collection_efficiency():
