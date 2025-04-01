@@ -18,6 +18,17 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from common.views import *
+from commercial.views import (
+    CustomerViewSet,
+    DailyEnergyDeliveredViewSet,
+    DailyRevenueCollectedViewSet,
+    MonthlyRevenueBilledViewSet,
+    MonthlyEnergyBilledViewSet,
+    MonthlyCustomerStatsViewSet,
+    FeederMetricsView,
+
+    CommercialMetricsSummaryView
+)
 
 router = DefaultRouter()
 router.register(r'states', StateViewSet)
@@ -27,7 +38,16 @@ router.register(r'feeders', FeederViewSet)
 router.register(r'transformers', DistributionTransformerViewSet)
 router.register(r'bands', BandViewSet)
 
+router.register(r'customers', CustomerViewSet, basename='customer')
+router.register(r'daily-energy-delivered', DailyEnergyDeliveredViewSet, basename='daily-energy-delivered')
+router.register(r'daily-revenue-collected', DailyRevenueCollectedViewSet, basename='daily-revenue-collected')
+router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+router.register(r'monthly-energy-billed', MonthlyEnergyBilledViewSet, basename='monthly-energy-billed')
+router.register(r'monthly-customer-stats', MonthlyCustomerStatsViewSet, basename='monthly-customer-stats')
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/metrics/feeder/', FeederMetricsView.as_view(), name='feeder-metrics'),
+    path('api/metrics/commercial-summary/', CommercialMetricsSummaryView.as_view(), name='commercial-summary')
 ]
