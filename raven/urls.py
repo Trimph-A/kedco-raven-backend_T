@@ -39,6 +39,18 @@ from technical.views import (
     TechnicalMonthlySummaryView
 )
 
+from financial.views import (
+    ExpenseCategoryViewSet,
+    ExpenseViewSet,
+    DailyCollectionViewSet,
+    MonthlyRevenueBilledViewSet,
+    SalesRepresentativeViewSet,
+    SalesRepPerformanceViewSet,
+    FinancialSummaryView,
+    SalesRepMetricsView
+)
+
+
 router = DefaultRouter()
 router.register(r'states', StateViewSet)
 router.register(r'districts', BusinessDistrictViewSet)
@@ -60,6 +72,15 @@ router.register(r'technical/hourly-load', HourlyLoadViewSet, basename='hourly-lo
 router.register(r'technical/interruptions', FeederInterruptionViewSet, basename='interruption')
 router.register(r'technical/hours-of-supply', DailyHoursOfSupplyViewSet, basename='hours-of-supply')
 
+
+router.register(r'financial/expense-categories', ExpenseCategoryViewSet, basename='expense-category')
+router.register(r'financial/expenses', ExpenseViewSet, basename='expense')
+router.register(r'financial/collections', DailyCollectionViewSet, basename='daily-collection')
+router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+router.register(r'financial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
+router.register(r'financial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
+
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
@@ -67,4 +88,7 @@ urlpatterns = [
     path('api/metrics/commercial-summary/', CommercialMetricsSummaryView.as_view(), name='commercial-summary'),
     path('api/metrics/technical-summary/', TechnicalMetricsView.as_view(), name='technical-summary'),
     path('api/metrics/technical-monthly/', TechnicalMonthlySummaryView.as_view(), name='technical-monthly-summary'),
+    path('api/metrics/financial-summary/', FinancialSummaryView.as_view(), name='financial-summary'),
+    path('api/metrics/sales-rep-summary/', SalesRepMetricsView.as_view(), name='sales-rep-summary'),
 ]
+
