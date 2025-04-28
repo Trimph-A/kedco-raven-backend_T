@@ -62,7 +62,7 @@ router.register(r'bands', BandViewSet)
 router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'daily-energy-delivered', DailyEnergyDeliveredViewSet, basename='daily-energy-delivered')
 router.register(r'daily-revenue-collected', DailyRevenueCollectedViewSet, basename='daily-revenue-collected')
-router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+# router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'monthly-energy-billed', MonthlyEnergyBilledViewSet, basename='monthly-energy-billed')
 router.register(r'monthly-customer-stats', MonthlyCustomerStatsViewSet, basename='monthly-customer-stats')
 

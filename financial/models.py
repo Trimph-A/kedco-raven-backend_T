@@ -36,7 +36,7 @@ class DailyCollection(models.Model):
 
 
 class MonthlyRevenueBilled(models.Model):
-    feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE)
+    feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE, related_name='financial_monthly_revenue_billed')
     month = models.DateField()
     amount = models.DecimalField(max_digits=15, decimal_places=2)
 

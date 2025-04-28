@@ -46,7 +46,7 @@ class DailyRevenueCollected(models.Model):
 
 
 class MonthlyRevenueBilled(models.Model):
-    feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE)
+    feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE, related_name='commercial_monthly_revenue_billed')
     month = models.DateField()  # Always use first day of month (e.g., 2025-03-01)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
 
