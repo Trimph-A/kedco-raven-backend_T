@@ -30,6 +30,15 @@ from commercial.views import (
     CommercialMetricsSummaryView
 )
 
+from technical.views import (
+    EnergyDeliveredViewSet,
+    HourlyLoadViewSet,
+    FeederInterruptionViewSet,
+    DailyHoursOfSupplyViewSet,
+    TechnicalMetricsView,
+    TechnicalMonthlySummaryView
+)
+
 router = DefaultRouter()
 router.register(r'states', StateViewSet)
 router.register(r'districts', BusinessDistrictViewSet)
@@ -45,9 +54,17 @@ router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename
 router.register(r'monthly-energy-billed', MonthlyEnergyBilledViewSet, basename='monthly-energy-billed')
 router.register(r'monthly-customer-stats', MonthlyCustomerStatsViewSet, basename='monthly-customer-stats')
 
+
+router.register(r'technical/energy-delivered', EnergyDeliveredViewSet, basename='energy-delivered')
+router.register(r'technical/hourly-load', HourlyLoadViewSet, basename='hourly-load')
+router.register(r'technical/interruptions', FeederInterruptionViewSet, basename='interruption')
+router.register(r'technical/hours-of-supply', DailyHoursOfSupplyViewSet, basename='hours-of-supply')
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/metrics/feeder/', FeederMetricsView.as_view(), name='feeder-metrics'),
-    path('api/metrics/commercial-summary/', CommercialMetricsSummaryView.as_view(), name='commercial-summary')
+    path('api/metrics/commercial-summary/', CommercialMetricsSummaryView.as_view(), name='commercial-summary'),
+    path('api/metrics/technical-summary/', TechnicalMetricsView.as_view(), name='technical-summary'),
+    path('api/metrics/technical-monthly/', TechnicalMonthlySummaryView.as_view(), name='technical-monthly-summary'),
 ]
