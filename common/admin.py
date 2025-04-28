@@ -1,41 +1,41 @@
 from django.contrib import admin
-from .models import (State,
-                     BusinessDistrict,
-                     InjectionSubstation,
-                     Feeder,
-                     DistributionTransformer,
-                     Band)
+from .models import State, BusinessDistrict, InjectionSubstation, Feeder, DistributionTransformer, Band
 
 @admin.register(State)
-class PostAdmin(admin.ModelAdmin):
+class StateAdmin(admin.ModelAdmin):
     list_display = ['name', 'slug']
-    search_fields = ['name',]
+    search_fields = ['name', 'slug']
+
 
 @admin.register(BusinessDistrict)
-class PostAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug', 'state', ]
-    list_filter = ['state',]
-    search_fields = ['name',]
+class BusinessDistrictAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug', 'state']
+    search_fields = ['name', 'slug']
+    list_filter = ['state']
+
 
 @admin.register(InjectionSubstation)
-class PostAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug', 'district',]
-    list_filter = ['district',]
-    search_fields = ['name',]
+class InjectionSubstationAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug', 'district']
+    search_fields = ['name', 'slug']
+    list_filter = ['district__state']
+
 
 @admin.register(Feeder)
-class PostAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug', 'substation',]
-    list_filter = ['substation',]
-    search_fields = ['name',]
+class FeederAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug', 'substation']
+    search_fields = ['name', 'slug']
+    list_filter = ['substation__district__state']
+
 
 @admin.register(DistributionTransformer)
-class PostAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug', 'feeder',]
-    list_filter = ['feeder',]
-    search_fields = ['name',]
+class DistributionTransformerAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug', 'feeder']
+    search_fields = ['name', 'slug']
+    list_filter = ['feeder__substation__district__state']
+
 
 @admin.register(Band)
-class PostAdmin(admin.ModelAdmin):
+class BandAdmin(admin.ModelAdmin):
     list_display = ['name', 'slug']
-    search_fields = ['name',]
+    search_fields = ['name', 'slug']
