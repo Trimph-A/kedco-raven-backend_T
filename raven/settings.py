@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'financial',
     'technical',
     'hr',
+    'regulatory',
 ]
 
 MIDDLEWARE = [
