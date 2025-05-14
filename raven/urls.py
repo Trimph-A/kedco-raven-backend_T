@@ -50,6 +50,18 @@ from financial.views import (
     SalesRepMetricsView
 )
 
+from regulatory.views import (
+    MonthlyEnergyOfftakeViewSet,
+    MonthlyRevenueRecoveryViewSet,
+    MonthlyUSoASubmissionViewSet,
+    MonthlyAPIStreamingRateViewSet,
+    MonthlyEstimatedBillingCappingViewSet,
+    MonthlyForumDecisionComplianceViewSet,
+    MonthlyNERCComplaintResolutionViewSet,
+)
+
+
+
 
 router = DefaultRouter()
 router.register(r'states', StateViewSet)
@@ -79,6 +91,15 @@ router.register(r'financial/collections', DailyCollectionViewSet, basename='dail
 router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'financial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
 router.register(r'financial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
+
+
+router.register(r'regulatory/energy-offtake', MonthlyEnergyOfftakeViewSet, basename='reg-energy-offtake')
+router.register(r'regulatory/revenue-recovery', MonthlyRevenueRecoveryViewSet, basename='reg-revenue-recovery')
+router.register(r'regulatory/usoa-submission', MonthlyUSoASubmissionViewSet, basename='reg-usoa')
+router.register(r'regulatory/api-streaming', MonthlyAPIStreamingRateViewSet, basename='reg-api-streaming')
+router.register(r'regulatory/estimated-capping', MonthlyEstimatedBillingCappingViewSet, basename='reg-capping')
+router.register(r'regulatory/forum-compliance', MonthlyForumDecisionComplianceViewSet, basename='reg-forum')
+router.register(r'regulatory/complaints-resolution', MonthlyNERCComplaintResolutionViewSet, basename='reg-complaints')
 
 
 urlpatterns = [
