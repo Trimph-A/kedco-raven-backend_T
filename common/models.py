@@ -8,6 +8,21 @@ class UUIDModel(models.Model):
     class Meta:
         abstract = True
 
+class Band(UUIDModel, models.Model):
+    name = models.CharField(max_length=50, unique=True)  # e.g., Band A, Band B
+    description = models.TextField(blank=True)
+    slug = models.SlugField(unique=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+        
+    def __str__(self):
+        return self.name
+
+
 
 class State(UUIDModel, models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -59,7 +74,14 @@ class InjectionSubstation(UUIDModel, models.Model):
 
 
 class Feeder(UUIDModel, models.Model):
+    FEEDER_VOLTAGE_CHOICES = [
+        ('11kv', '11kV'),
+        ('33kv', '33kV'),
+    ]
+
     name = models.CharField(max_length=100)
+    band = models.ForeignKey(Band, on_delete=models.SET_NULL, null=True)
+    voltage_level = models.CharField(max_length=10, choices=FEEDER_VOLTAGE_CHOICES)
     substation = models.ForeignKey(InjectionSubstation, on_delete=models.CASCADE, related_name='feeders')
     slug = models.SlugField(unique=True, blank=True)
 
@@ -95,16 +117,3 @@ class DistributionTransformer(UUIDModel, models.Model):
 
 
 
-class Band(UUIDModel, models.Model):
-    name = models.CharField(max_length=50, unique=True)  # e.g., Band A, Band B
-    description = models.TextField(blank=True)
-    slug = models.SlugField(unique=True, blank=True)
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = slugify(self.name)
-        super().save(*args, **kwargs)
-
-        
-    def __str__(self):
-        return self.name
