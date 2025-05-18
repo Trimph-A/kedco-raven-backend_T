@@ -43,7 +43,6 @@ INSTALLED_APPS = [
     'technical',
     'hr',
     'regulatory',
-    'core',
 ]
 
 MIDDLEWARE = [
