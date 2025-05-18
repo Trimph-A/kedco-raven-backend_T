@@ -49,6 +49,7 @@ from financial.views import (
     FinancialSummaryView,
     SalesRepMetricsView
 )
+from financial.views import GLBreakdownViewSet
 
 from regulatory.views import (
     MonthlyEnergyOfftakeViewSet,
@@ -62,6 +63,8 @@ from regulatory.views import (
 
 from hr.views import DepartmentViewSet, RoleViewSet, StaffViewSet
 from hr.views import HRMetricsSummaryView
+
+
 
 
 
@@ -94,6 +97,8 @@ router.register(r'financial/collections', DailyCollectionViewSet, basename='dail
 router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'financial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
 router.register(r'financial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
+router.register(r'financial/gl-breakdowns', GLBreakdownViewSet, basename='gl-breakdown')
+
 
 
 router.register(r'regulatory/energy-offtake', MonthlyEnergyOfftakeViewSet, basename='reg-energy-offtake')
@@ -121,4 +126,7 @@ urlpatterns = [
     path('api/metrics/hr-summary/', HRMetricsSummaryView.as_view(), name='hr-summary'),
 
 ]
+
+
+
 

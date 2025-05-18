@@ -9,8 +9,8 @@ class ExpenseCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
-    list_display = ['category', 'amount', 'month', 'feeder', 'transformer']
-    list_filter = ['category', 'month', 'feeder__substation__district__state']
+    list_display = ['date', 'opex_category', 'credit', 'debit', 'district__name']
+    list_filter = ['opex_category',]
 
 
 @admin.register(DailyCollection)

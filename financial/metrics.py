@@ -110,3 +110,31 @@ def get_sales_rep_performance_summary(request):
     )
 
     return {key: round(value, 2) if isinstance(value, float) else (value or 0) for key, value in summary.items()}
+
+
+
+def get_financial_summary(request):
+    district = request.GET.get('district')
+    state = request.GET.get('state')
+    month_from, month_to = get_date_range_from_request(request, 'month')
+
+    qs = Expense.objects.all()
+    if state:
+        qs = qs.filter(district__state__slug=state)
+    if district:
+        qs = qs.filter(district__slug=district)
+    if month_from and month_to:
+        qs = qs.filter(date__range=(month_from, month_to))
+
+    total_expense = qs.aggregate(total=Sum('credit'))['total'] or 0
+    total_disbursed = qs.aggregate(total=Sum('debit'))['total'] or 0
+
+    opex_breakdown = qs.values('opex_category__name').annotate(
+        total=Sum('credit')
+    ).order_by('-total')
+
+    return {
+        "total_expense": total_expense,
+        "hq_disbursement": total_disbursed,
+        "opex_breakdown": list(opex_breakdown)
+    }

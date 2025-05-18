@@ -6,6 +6,10 @@ class ExpenseCategorySerializer(serializers.ModelSerializer):
         model = ExpenseCategory
         fields = '__all__'
 
+class GLBreakdownSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GLBreakdown
+        fields = '__all__'
 
 class ExpenseSerializer(serializers.ModelSerializer):
     class Meta:

@@ -7,17 +7,29 @@ class ExpenseCategory(UUIDModel, models.Model):
 
     def __str__(self):
         return self.name
+    
+class GLBreakdown(UUIDModel, models.Model):
+    name = models.CharField(max_length=150, unique=True)
+
+    def __str__(self):
+        return self.name
 
 
 class Expense(UUIDModel, models.Model):
-    category = models.ForeignKey(ExpenseCategory, on_delete=models.CASCADE)
-    description = models.TextField()
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
-    month = models.DateField()  # Always store first day of the month
-    feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE, null=True, blank=True)
-    transformer = models.ForeignKey(DistributionTransformer, on_delete=models.CASCADE, null=True, blank=True)
+    district = models.ForeignKey('common.BusinessDistrict', on_delete=models.CASCADE)
+    date = models.DateField()
+    purpose = models.TextField()
+    payee = models.CharField(max_length=200)
+    gl_account_number = models.CharField(max_length=20)
+    gl_breakdown = models.ForeignKey(GLBreakdown, on_delete=models.SET_NULL, null=True)
+    opex_category = models.ForeignKey('ExpenseCategory', on_delete=models.SET_NULL, null=True)
+    debit = models.DecimalField(max_digits=15, decimal_places=2, default=0.0)  # Sent from HQ
+    credit = models.DecimalField(max_digits=15, decimal_places=2, default=0.0)  # Expense
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date']
 
 
 class DailyCollection(UUIDModel, models.Model):
