@@ -1,8 +1,8 @@
 import uuid
 from django.db import models
-from common.models import State, BusinessDistrict
+from common.models import UUIDModel, State, BusinessDistrict
 
-class Department(models.Model):
+class Department(UUIDModel, models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(unique=True)
@@ -11,7 +11,7 @@ class Department(models.Model):
         return self.name
 
 
-class Role(models.Model):
+class Role(UUIDModel, models.Model):
     title = models.CharField(max_length=100)
     department = models.ForeignKey(Department, on_delete=models.CASCADE)
     slug = models.SlugField(unique=True)
@@ -20,7 +20,7 @@ class Role(models.Model):
         return self.title
 
 
-class Staff(models.Model):
+class Staff(UUIDModel, models.Model):
     GRADE_CHOICES = [
         ('associate', 'Associate'),
         ('graduate_trainee', 'Graduate Trainee'),

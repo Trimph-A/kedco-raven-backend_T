@@ -1,7 +1,7 @@
 from django.db import models
-from common.models import Feeder, DistributionTransformer, Band
+from common.models import UUIDModel, Feeder, DistributionTransformer, Band
 
-class ExpenseCategory(models.Model):
+class ExpenseCategory(UUIDModel, models.Model):
     name = models.CharField(max_length=100, unique=True)
     is_special = models.BooleanField(default=False)  # Special OPEX types like Salaries, NBET Invoice
 
@@ -9,7 +9,7 @@ class ExpenseCategory(models.Model):
         return self.name
 
 
-class Expense(models.Model):
+class Expense(UUIDModel, models.Model):
     category = models.ForeignKey(ExpenseCategory, on_delete=models.CASCADE)
     description = models.TextField()
     amount = models.DecimalField(max_digits=15, decimal_places=2)
@@ -20,7 +20,7 @@ class Expense(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
-class DailyCollection(models.Model):
+class DailyCollection(UUIDModel, models.Model):
     COLLECTION_TYPE_CHOICES = (
         ('Prepaid', 'Prepaid'),
         ('Postpaid', 'Postpaid'),
@@ -35,7 +35,7 @@ class DailyCollection(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
-class MonthlyRevenueBilled(models.Model):
+class MonthlyRevenueBilled(UUIDModel, models.Model):
     feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE, related_name='financial_monthly_revenue_billed')
     month = models.DateField()
     amount = models.DecimalField(max_digits=15, decimal_places=2)
@@ -43,7 +43,7 @@ class MonthlyRevenueBilled(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
-class SalesRepresentative(models.Model):
+class SalesRepresentative(UUIDModel, models.Model):
     name = models.CharField(max_length=255)
     assigned_transformers = models.ManyToManyField(DistributionTransformer)
     slug = models.SlugField(unique=True)
@@ -52,7 +52,7 @@ class SalesRepresentative(models.Model):
         return self.name
 
 
-class SalesRepPerformance(models.Model):
+class SalesRepPerformance(UUIDModel, models.Model):
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
     month = models.DateField()
     outstanding_billed = models.DecimalField(max_digits=15, decimal_places=2)

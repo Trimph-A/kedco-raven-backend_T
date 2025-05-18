@@ -94,7 +94,7 @@ class DistributionTransformer(UUIDModel, models.Model):
         return f"{self.name} - {self.feeder}"
 
 
-# Optional: Prepare for banding
+
 class Band(UUIDModel, models.Model):
     name = models.CharField(max_length=50, unique=True)  # e.g., Band A, Band B
     description = models.TextField(blank=True)

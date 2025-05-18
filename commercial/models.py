@@ -1,8 +1,8 @@
 from django.db import models
-from common.models import DistributionTransformer, Band
+from common.models import UUIDModel, DistributionTransformer, Band
 from django.utils import timezone
 
-class Customer(models.Model):
+class Customer(UUIDModel, models.Model):
     METERING_TYPE_CHOICES = [
         ('MD1', 'MD1'),
         ('MD2', 'MD2'),
@@ -27,7 +27,7 @@ class Customer(models.Model):
         return self.name
 
 
-class DailyEnergyDelivered(models.Model):
+class DailyEnergyDelivered(UUIDModel, models.Model):
     feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE)
     date = models.DateField()
     energy_mwh = models.DecimalField(max_digits=10, decimal_places=2)
@@ -36,7 +36,7 @@ class DailyEnergyDelivered(models.Model):
         unique_together = ('feeder', 'date')
 
 
-class DailyRevenueCollected(models.Model):
+class DailyRevenueCollected(UUIDModel, models.Model):
     feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE)
     date = models.DateField()
     amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -45,7 +45,7 @@ class DailyRevenueCollected(models.Model):
         unique_together = ('feeder', 'date')
 
 
-class MonthlyRevenueBilled(models.Model):
+class MonthlyRevenueBilled(UUIDModel, models.Model):
     feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE, related_name='commercial_monthly_revenue_billed')
     month = models.DateField()  # Always use first day of month (e.g., 2025-03-01)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -54,7 +54,7 @@ class MonthlyRevenueBilled(models.Model):
         unique_together = ('feeder', 'month')
 
 
-class MonthlyEnergyBilled(models.Model):
+class MonthlyEnergyBilled(UUIDModel, models.Model):
     feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE)
     month = models.DateField()
     energy_mwh = models.DecimalField(max_digits=10, decimal_places=2)
@@ -63,7 +63,7 @@ class MonthlyEnergyBilled(models.Model):
         unique_together = ('feeder', 'month')
 
 
-class MonthlyCustomerStats(models.Model):
+class MonthlyCustomerStats(UUIDModel, models.Model):
     feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE)
     month = models.DateField()
     customer_count = models.PositiveIntegerField()
