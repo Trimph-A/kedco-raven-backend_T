@@ -60,6 +60,8 @@ from regulatory.views import (
     MonthlyNERCComplaintResolutionViewSet,
 )
 
+from hr.views import DepartmentViewSet, RoleViewSet, StaffViewSet
+
 
 
 
@@ -100,6 +102,10 @@ router.register(r'regulatory/api-streaming', MonthlyAPIStreamingRateViewSet, bas
 router.register(r'regulatory/estimated-capping', MonthlyEstimatedBillingCappingViewSet, basename='reg-capping')
 router.register(r'regulatory/forum-compliance', MonthlyForumDecisionComplianceViewSet, basename='reg-forum')
 router.register(r'regulatory/complaints-resolution', MonthlyNERCComplaintResolutionViewSet, basename='reg-complaints')
+
+router.register(r'hr/departments', DepartmentViewSet, basename='hr-department')
+router.register(r'hr/roles', RoleViewSet, basename='hr-role')
+router.register(r'hr/staff', StaffViewSet, basename='hr-staff')
 
 
 urlpatterns = [
