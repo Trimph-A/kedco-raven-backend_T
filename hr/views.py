@@ -7,6 +7,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from hr.metrics import get_hr_summary
 from common.utils.filters import get_month_range_from_request
+from django.db.models import Avg, Count, Sum
+
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):
