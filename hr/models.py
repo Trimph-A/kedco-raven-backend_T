@@ -31,7 +31,7 @@ class Staff(UUIDModel, models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     full_name = models.CharField(max_length=150)
-    email = models.EmailField()
+    email = models.EmailField(null=True, blank=True)
     phone_number = models.CharField(max_length=20)
     gender = models.CharField(max_length=10, choices=[('Male', 'Male'), ('Female', 'Female')])
     birth_date = models.DateField()

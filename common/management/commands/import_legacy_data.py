@@ -29,13 +29,13 @@ class Command(BaseCommand):
         )
 
         with conn:
-            self.import_states(conn)
-            self.import_districts(conn)
-            self.import_injection_stations(conn)
-            self.import_feeders(conn)
-            self.import_gl_breakdowns(conn)
-            self.import_expenses(conn)
-            self.import_hourly_load(conn)
+            # self.import_states(conn)
+            # self.import_districts(conn)
+            # self.import_injection_stations(conn)
+            # self.import_feeders(conn)
+            # self.import_gl_breakdowns(conn)
+            # self.import_expenses(conn)
+            # self.import_hourly_load(conn)
             self.import_staff(conn)
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
