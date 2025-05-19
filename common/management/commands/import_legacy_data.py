@@ -220,10 +220,10 @@ class Command(BaseCommand):
                 Staff.objects.create(
                     full_name=row["name"].strip(),
                     email=parse_nullable(row["email"]),
-                    phone_number=parse_nullable(row["phone_number"]),
+                    phone_number=parse_nullable(row["phone_number"], "N/A"),
                     gender=row["gender"],
                     birth_date=date.today(),  # Placeholder for now
-                    salary=row["salary"],
+                    salary=parse_nullable(row["salary"], 0),
                     hire_date=hire_date,
                     exit_date=parse_date(str(row["end_date"])) if row["end_date"] else None,
                     grade=grade_name,
