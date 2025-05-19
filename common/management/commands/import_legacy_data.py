@@ -208,6 +208,15 @@ class Command(BaseCommand):
                     defaults={"title": grade_name, "department": department}
                 )
 
+                raw_hire_date = row.get("start_date")
+                hire_date = parse_date(str(raw_hire_date)) if raw_hire_date else previous_hire_date
+                if hire_date:
+                    previous_hire_date = hire_date
+                else:
+                    self.stdout.write(self.style.WARNING(
+                        f"Staff {row['name'].strip()} skipped: no valid hire date and no fallback available."))
+                    continue
+
                 Staff.objects.create(
                     full_name=row["name"].strip(),
                     email=parse_nullable(row["email"]),
@@ -215,7 +224,7 @@ class Command(BaseCommand):
                     gender=row["gender"],
                     birth_date=date.today(),  # Placeholder for now
                     salary=row["salary"],
-                    hire_date=parse_date(str(row["start_date"])),
+                    hire_date=hire_date,
                     exit_date=parse_date(str(row["end_date"])) if row["end_date"] else None,
                     grade=grade_name,
                     role=role,
