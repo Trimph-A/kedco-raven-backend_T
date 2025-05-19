@@ -6,6 +6,7 @@ from hr.models import Staff, Department, Role
 from django.utils.dateparse import parse_date
 from decouple import config
 from datetime import date
+from django.utils.text import slugify
 import pymysql
 
 
@@ -17,7 +18,7 @@ class Command(BaseCommand):
     help = 'Import legacy data from external MySQL database'
 
     def handle(self, *args, **kwargs):
-        self.stdout.write("Connecting to external MySQL database...")
+        self.stdout.write(self.style.MIGRATE_HEADING("Connecting to external MySQL database..."))
 
         conn = pymysql.connect(
             host=config("legacy_mysql_server"),
@@ -40,44 +41,59 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
     def import_states(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting States..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("SELECT state_id, state_name FROM states")
             for row in cursor.fetchall():
-                State.objects.get_or_create(
+                _, created = State.objects.get_or_create(
                     slug=row["state_id"].strip(),
                     defaults={"name": row["state_name"].strip()}
                 )
+                count += int(created)
+        self.stdout.write(self.style.SUCCESS(f"States imported: {count} new entries."))
 
     def import_districts(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Business Districts..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("SELECT district_id, district_name, state_id FROM business_districts")
             for row in cursor.fetchall():
                 state = State.objects.filter(slug=row["state_id"].strip()).first()
                 if state:
-                    BusinessDistrict.objects.get_or_create(
+                    _, created = BusinessDistrict.objects.get_or_create(
                         slug=row["district_id"].strip(),
                         defaults={"name": row["district_name"].strip(), "state": state}
                     )
+                    count += int(created)
+        self.stdout.write(self.style.SUCCESS(f"Business Districts imported: {count} new entries."))
 
     def import_injection_stations(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Injection Substations..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("SELECT injection_station_id, injection_station_name, district_id FROM injection_stations")
             for row in cursor.fetchall():
                 district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
                 if district:
-                    InjectionSubstation.objects.get_or_create(
+                    _, created = InjectionSubstation.objects.get_or_create(
                         slug=row["injection_station_id"].strip(),
                         defaults={"name": row["injection_station_name"].strip(), "district": district}
                     )
+                    count += int(created)
+        self.stdout.write(self.style.SUCCESS(f"Substations imported: {count} new entries."))
+
 
     def import_feeders(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Feeders..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("SELECT feeder_id, feeder_name, injection_station_id, service_band FROM feeders")
             for row in cursor.fetchall():
                 substation = InjectionSubstation.objects.filter(slug=row["injection_station_id"].strip()).first()
                 band = Band.objects.filter(name__iexact=row["service_band"].strip()).first()
                 if substation:
-                    Feeder.objects.get_or_create(
+                    _, created = Feeder.objects.get_or_create(
                         slug=row["feeder_id"].strip(),
                         defaults={
                             "name": row["feeder_name"].strip(),
@@ -86,16 +102,25 @@ class Command(BaseCommand):
                             "voltage_level": "11kv" if "11KV" in row["feeder_name"].upper() else "33kv"
                         }
                     )
+                    count += int(created)
+        self.stdout.write(self.style.SUCCESS(f"Feeders imported: {count} new entries."))
 
     def import_gl_breakdowns(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting GL Breakdowns..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("SELECT DISTINCT `GL Account opex break down` FROM financialopex")
             for row in cursor.fetchall():
                 name = row["GL Account opex break down"]
                 if name:
-                    GLBreakdown.objects.get_or_create(name=name.strip())
+                    _, created = GLBreakdown.objects.get_or_create(name=name.strip())
+                    count += int(created)
+        self.stdout.write(self.style.SUCCESS(f"GL Breakdowns imported: {count} new entries."))
+
 
     def import_expenses(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Expenses..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("""
                 SELECT district_id, date, `Purpose of transaction`, `Payment to`, 
@@ -105,16 +130,18 @@ class Command(BaseCommand):
             for row in cursor.fetchall():
                 district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
                 if not district:
+                    self.stdout.write(self.style.WARNING(f"Skipping expense — unknown district {row['district_id']}"))
                     continue
 
                 category, _ = ExpenseCategory.objects.get_or_create(name=row["opex categorization"].strip())
                 breakdown = GLBreakdown.objects.filter(name=row["GL Account opex break down"].strip()).first()
+                
 
                 if breakdown:
                     Expense.objects.create(
                         district=district,
                         date=parse_date(str(row["date"])),
-                        purpose=parse_nullable(row["Purpose of transaction"]),
+                        purpose=parse_nullable(row["Purpose of transaction"], 'N/A'),
                         payee=parse_nullable(row["Payment to"], "N/A"),
                         debit=parse_nullable(row["Debit"], 0.0),
                         credit=parse_nullable(row["Credit"], 0.0),
@@ -123,7 +150,15 @@ class Command(BaseCommand):
                         opex_category=category
                     )
 
+                if not breakdown:
+                    self.stdout.write(self.style.WARNING(f"Skipping expense — unknown GL breakdown"))
+                    continue
+        self.stdout.write(self.style.SUCCESS(f"Expenses imported: {count} entries."))
+
+
     def import_hourly_load(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Hourly Load Data..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("SELECT feeder_id, reading_date, reading_hour, load_mw FROM hourly_load")
             for row in cursor.fetchall():
@@ -134,14 +169,22 @@ class Command(BaseCommand):
                 except (ValueError, TypeError):
                     continue
                 if feeder:
-                    HourlyLoad.objects.create(
+                    reading_date = parse_date(str(row["reading_date"]))
+                    reading_hour = row["reading_hour"]
+
+                    obj, created = HourlyLoad.objects.update_or_create(
                         feeder=feeder,
-                        date=parse_date(str(row["reading_date"])),
-                        hour=row["reading_hour"],
-                        load_mw=load_value
+                        date=reading_date,
+                        hour=reading_hour,
+                        defaults={"load_mw": load_value}
                     )
 
+        self.stdout.write(self.style.SUCCESS(f"Hourly Load rows imported: {count} entries."))
+
+
     def import_staff(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting HR Staff..."))
+        count = 0
         with conn.cursor() as cursor:
             cursor.execute("""
                 SELECT staff_id, district_id, name, email, phone_number, gender, salary, 
@@ -153,8 +196,17 @@ class Command(BaseCommand):
                 dept_name = row["Department"].strip()
                 grade_name = row["grade"].strip()
 
-                department, _ = Department.objects.get_or_create(name=dept_name)
-                role, _ = Role.objects.get_or_create(title=grade_name, department=department)
+                slug = slugify(dept_name)
+                department, _ = Department.objects.get_or_create(
+                    slug=slug,
+                    defaults={"name": dept_name}
+                )
+
+                role_slug = slugify(grade_name)
+                role, _ = Role.objects.get_or_create(
+                    slug=role_slug,
+                    defaults={"title": grade_name, "department": department}
+                )
 
                 Staff.objects.create(
                     full_name=row["name"].strip(),
@@ -171,3 +223,5 @@ class Command(BaseCommand):
                     district=district,
                     state=district.state if district else None
                 )
+        self.stdout.write(self.style.SUCCESS(f"Staff imported: {count} entries."))
+
