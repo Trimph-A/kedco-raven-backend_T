@@ -115,7 +115,7 @@ class Command(BaseCommand):
                         district=district,
                         date=parse_date(str(row["date"])),
                         purpose=parse_nullable(row["Purpose of transaction"]),
-                        payee=parse_nullable(row["Payment to"]),
+                        payee=parse_nullable(row["Payment to"], "N/A"),
                         debit=parse_nullable(row["Debit"], 0.0),
                         credit=parse_nullable(row["Credit"], 0.0),
                         gl_account_number=str(row["GL Account code number"]).strip(),
