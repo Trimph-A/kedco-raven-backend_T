@@ -62,7 +62,7 @@ from regulatory.views import (
 )
 
 from hr.views import DepartmentViewSet, RoleViewSet, StaffViewSet
-from hr.views import HRMetricsSummaryView, StaffSummaryView
+from hr.views import HRMetricsSummaryView, StaffSummaryView, StaffStateOverviewView
 
 
 
@@ -125,6 +125,8 @@ urlpatterns = [
     path('api/metrics/sales-rep-summary/', SalesRepMetricsView.as_view(), name='sales-rep-summary'),
     path('api/metrics/hr-summary/', HRMetricsSummaryView.as_view(), name='hr-summary'),
     path('api/metrics/staff-summary/', StaffSummaryView.as_view(), name='staff-summary'),
+    path('api/metrics/staff/state-overview/', StaffStateOverviewView.as_view(), name='staff-state-overview'),
+
 
 ]
 
