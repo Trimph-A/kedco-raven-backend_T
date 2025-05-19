@@ -12,6 +12,7 @@ from datetime import date
 from common.models import State
 from financial.models import DailyCollection
 from common.utils.filters import get_month_range_from_request
+from django.shortcuts import get_object_or_404
 
 
 
@@ -136,3 +137,41 @@ class StaffStateOverviewView(APIView):
             })
 
         return Response(results)
+
+
+class StaffStateDetailView(APIView):
+    def get(self, request, slug):
+        from_date, to_date = get_month_range_from_request(request)
+        state = get_object_or_404(State, slug=slug)
+
+        staff_qs = Staff.objects.filter(state=state, hire_date__lte=to_date)
+        active_staff = staff_qs.filter(Q(exit_date__isnull=True) | Q(exit_date__gt=to_date))
+        exited_staff = staff_qs.filter(exit_date__range=(from_date, to_date))
+
+        total_staff = staff_qs.count()
+        active_count = active_staff.count()
+        exited_count = exited_staff.count()
+
+        retention_rate = round((active_count / total_staff) * 100, 2) if total_staff else 0
+        turnover_rate = round((exited_count / total_staff) * 100, 2) if total_staff else 0
+
+        total_collection = DailyCollection.objects.filter(
+            district__state=state,
+            date__range=(from_date, to_date)
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        collections_per_staff = round(total_collection / active_count) if active_count else 0
+
+        gender_split = staff_qs.values("gender").annotate(count=Count("id"))
+        department_split = staff_qs.values("department__name").annotate(count=Count("id"))
+
+        return Response({
+            "state": state.name,
+            "slug": state.slug,
+            "total_staff": total_staff,
+            "collections_per_staff": collections_per_staff,
+            "retention_rate": retention_rate,
+            "turnover_rate": turnover_rate,
+            "gender_distribution": gender_split,
+            "department_distribution": department_split
+        })
