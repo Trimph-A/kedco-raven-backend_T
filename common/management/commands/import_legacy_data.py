@@ -17,7 +17,7 @@ class Command(BaseCommand):
     help = 'Import legacy data from external MySQL database'
 
     def handle(self, *args, **kwargs):
-        self.stdout.write("🔌 Connecting to external MySQL database...")
+        self.stdout.write("Connecting to external MySQL database...")
 
         conn = pymysql.connect(
             host=config("legacy_mysql_server"),
@@ -37,7 +37,7 @@ class Command(BaseCommand):
             self.import_hourly_load(conn)
             self.import_staff(conn)
 
-        self.stdout.write(self.style.SUCCESS('✅ Legacy data imported successfully.'))
+        self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
     def import_states(self, conn):
         with conn.cursor() as cursor:
@@ -89,7 +89,7 @@ class Command(BaseCommand):
 
     def import_gl_breakdowns(self, conn):
         with conn.cursor() as cursor:
-            cursor.execute("SELECT DISTINCT `GL Account opex break down` FROM gl_codes")
+            cursor.execute("SELECT DISTINCT `GL Account opex break down` FROM financialopex")
             for row in cursor.fetchall():
                 name = row["GL Account opex break down"]
                 if name:
