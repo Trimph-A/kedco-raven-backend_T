@@ -5,7 +5,7 @@ from technical.models import HourlyLoad
 from hr.models import Staff, Department, Role
 from django.utils.dateparse import parse_date
 from decouple import config
-from datetime import date
+from datetime import date, timedelta
 from django.utils.text import slugify
 import pymysql
 
@@ -185,10 +185,13 @@ class Command(BaseCommand):
     def import_staff(self, conn):
         self.stdout.write(self.style.HTTP_INFO("\nImporting HR Staff..."))
         count = 0
+        previous_hire_date = None
+        previous_birth_date = None
+
         with conn.cursor() as cursor:
             cursor.execute("""
                 SELECT staff_id, district_id, name, email, phone_number, gender, salary, 
-                       start_date, end_date, Department, grade 
+                       start_date, end_date, Department, grade, age
                 FROM hr_staff
             """)
             for row in cursor.fetchall():
@@ -217,12 +220,21 @@ class Command(BaseCommand):
                         f"Staff {row['name'].strip()} skipped: no valid hire date and no fallback available."))
                     continue
 
+                raw_age = row.get("age")
+                if raw_age and isinstance(raw_age, (int, float)):
+                    birth_date = date.today() - timedelta(days=round(float(raw_age) * 365.25))
+                    previous_birth_date = birth_date
+                elif previous_birth_date:
+                    birth_date = previous_birth_date
+                else:
+                    birth_date = date.today() - timedelta(days=30 * 365)
+
                 Staff.objects.create(
                     full_name=row["name"].strip(),
                     email=parse_nullable(row["email"]),
                     phone_number=parse_nullable(row["phone_number"], "N/A"),
                     gender=row["gender"],
-                    birth_date=date.today(),  # Placeholder for now
+                    birth_date=birth_date,
                     salary=parse_nullable(row["salary"], 0),
                     hire_date=hire_date,
                     exit_date=parse_date(str(row["end_date"])) if row["end_date"] else None,
@@ -232,5 +244,6 @@ class Command(BaseCommand):
                     district=district,
                     state=district.state if district else None
                 )
+                count += 1
         self.stdout.write(self.style.SUCCESS(f"Staff imported: {count} entries."))
 

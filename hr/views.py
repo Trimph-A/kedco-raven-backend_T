@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from hr.metrics import get_hr_summary
 from common.utils.filters import get_month_range_from_request
 from django.db.models import Avg, Count, Sum
+from datetime import date
 
 
 
@@ -42,13 +43,20 @@ class HRMetricsSummaryView(APIView):
 
 
 class StaffSummaryView(APIView):
+    
+    
     def get(self, request):
+        def calculate_age(birth_date):
+            today = date.today()
+            return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+        
         from_date, to_date = get_month_range_from_request(request)
         queryset = Staff.objects.filter(hire_date__lte=to_date)
         
         total_count = queryset.count()
         avg_salary = queryset.aggregate(avg_salary=Avg("salary"))["avg_salary"] or 0
-        avg_age = queryset.aggregate(avg_age=Avg("age"))["avg_age"] or 0
+        ages = [calculate_age(staff.birth_date) for staff in queryset if staff.birth_date]
+        avg_age = round(sum(ages) / len(ages)) if ages else 0
         
         distribution = queryset.values("department__name").annotate(count=Count("id"))
         gender_split = queryset.values("gender").annotate(count=Count("id"))
