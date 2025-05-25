@@ -34,7 +34,7 @@ class FeederInterruption(UUIDModel, models.Model):
     interruption_type = models.CharField(max_length=50, choices=INTERRUPTION_TYPES)
     description = models.TextField(blank=True, null=True)
     occurred_at = models.DateTimeField()
-    restored_at = models.DateTimeField()
+    restored_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         unique_together = ("feeder", "occurred_at", "interruption_type")

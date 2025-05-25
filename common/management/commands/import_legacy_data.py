@@ -7,6 +7,8 @@ from django.utils.dateparse import parse_date
 from decouple import config
 from datetime import date, timedelta
 from django.utils.text import slugify
+from django.utils.timezone import make_aware
+import datetime
 import pymysql
 
 
@@ -33,10 +35,11 @@ class Command(BaseCommand):
             self.import_districts(conn)
             self.import_injection_stations(conn)
             self.import_feeders(conn)
-            # self.import_gl_breakdowns(conn)
-            # self.import_expenses(conn)
-            # self.import_hourly_load(conn)
-            # self.import_staff(conn)
+            self.import_feeder_interruptions(conn)
+            self.import_gl_breakdowns(conn)
+            self.import_expenses(conn)
+            self.import_hourly_load(conn)
+            self.import_staff(conn)
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
@@ -279,3 +282,63 @@ class Command(BaseCommand):
                 count += 1
         self.stdout.write(self.style.SUCCESS(f"Staff imported: {count} entries."))
 
+
+    def import_feeder_interruptions(self, conn):
+        from technical.models import FeederInterruption
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Feeder Interruptions..."))
+        count = 0
+        skipped = 0
+
+        FAULT_TYPE_MAP = {
+            "Earth Fault": "E/F",
+            "Overcurrent Fault": "O/C",
+            "Overcurrent and Earth Fault": "O/C & E/F",
+            None: "N/A",
+            "": "N/A",
+        }
+
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT feeder_id, fault_occurrence, fault_resolve, fault_type, brief_description
+                FROM feeder_faults
+            """)
+            for row in cursor.fetchall():
+                feeder_slug = row["feeder_id"].strip()
+                feeder = Feeder.objects.filter(slug=feeder_slug).first()
+
+                if not feeder:
+                    self.stdout.write(self.style.WARNING(f"Feeder not found: {feeder_slug}"))
+                    skipped += 1
+                    continue
+
+                interruption_type = FAULT_TYPE_MAP.get(row["fault_type"], row["fault_type"] or "N/A")
+                occurred_at = row["fault_occurrence"]
+                restored_at = row.get("fault_resolve") or None  # Could be NULL
+                description = parse_nullable(row.get("brief_description"), "").strip()
+
+                if occurred_at and isinstance(occurred_at, datetime.datetime) and occurred_at.tzinfo is None:
+                    occurred_at = make_aware(occurred_at)
+
+                if restored_at and isinstance(restored_at, datetime.datetime) and restored_at.tzinfo is None:
+                    restored_at = make_aware(restored_at)
+
+
+                # Ensure no duplicates
+                exists = FeederInterruption.objects.filter(
+                    feeder=feeder,
+                    occurred_at=occurred_at,
+                    interruption_type=interruption_type,
+                ).exists()
+
+                if not exists:
+                    FeederInterruption.objects.create(
+                        feeder=feeder,
+                        occurred_at=occurred_at,
+                        restored_at=restored_at,
+                        interruption_type=interruption_type,
+                        description=description
+                    )
+                    count += 1
+
+        self.stdout.write(self.style.SUCCESS(f"Feeder interruptions imported: {count} entries."))
+        self.stdout.write(self.style.WARNING(f"Skipped: {skipped} rows (e.g., missing feeder)"))
