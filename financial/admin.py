@@ -22,13 +22,13 @@ class ExpenseAdmin(admin.ModelAdmin):
 @admin.register(DailyCollection)
 class DailyCollectionAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'date', 'amount', 'collection_type', 'vendor_name']
-    list_filter = ['collection_type', 'feeder__substation__district__state', 'date']
+    list_filter = ['collection_type', 'date']
 
 
 @admin.register(MonthlyRevenueBilled)
 class MonthlyRevenueBilledAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'month', 'amount']
-    list_filter = ['feeder__substation__district__state', 'month']
+    list_filter = ['month',]
 
 
 @admin.register(SalesRepresentative)

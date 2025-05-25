@@ -29,14 +29,14 @@ class Command(BaseCommand):
         )
 
         with conn:
-            # self.import_states(conn)
-            # self.import_districts(conn)
-            # self.import_injection_stations(conn)
-            # self.import_feeders(conn)
+            self.import_states(conn)
+            self.import_districts(conn)
+            self.import_injection_stations(conn)
+            self.import_feeders(conn)
             # self.import_gl_breakdowns(conn)
             # self.import_expenses(conn)
             # self.import_hourly_load(conn)
-            self.import_staff(conn)
+            # self.import_staff(conn)
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
@@ -44,10 +44,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.HTTP_INFO("\nImporting States..."))
         count = 0
         with conn.cursor() as cursor:
-            cursor.execute("SELECT state_name FROM states")
+            cursor.execute("SELECT state_id, state_name FROM states")
             for row in cursor.fetchall():
                 name = row["state_name"].strip()
-                slug = slugify(name)
+                slug = row["state_id"].strip()  # Use ID as slug
                 _, created = State.objects.get_or_create(
                     slug=slug,
                     defaults={"name": name}
@@ -55,15 +55,16 @@ class Command(BaseCommand):
                 count += int(created)
         self.stdout.write(self.style.SUCCESS(f"States imported: {count} new entries."))
 
+
     def import_districts(self, conn):
         self.stdout.write(self.style.HTTP_INFO("\nImporting Business Districts..."))
         count = 0
         with conn.cursor() as cursor:
-            cursor.execute("SELECT district_name, state_id FROM business_districts")
+            cursor.execute("SELECT district_id, district_name, state_id FROM business_districts")
             for row in cursor.fetchall():
                 name = row["district_name"].strip()
-                slug = slugify(name)
-                state = State.objects.filter(slug=slugify(row["state_id"].strip())).first()
+                slug = row["district_id"].strip()
+                state = State.objects.filter(slug=row["state_id"].strip()).first()
                 if state:
                     _, created = BusinessDistrict.objects.get_or_create(
                         slug=slug,
@@ -72,15 +73,16 @@ class Command(BaseCommand):
                     count += int(created)
         self.stdout.write(self.style.SUCCESS(f"Business Districts imported: {count} new entries."))
 
+
     def import_injection_stations(self, conn):
         self.stdout.write(self.style.HTTP_INFO("\nImporting Injection Substations..."))
         count = 0
         with conn.cursor() as cursor:
-            cursor.execute("SELECT injection_station_name, district_id FROM injection_stations")
+            cursor.execute("SELECT injection_station_id, injection_station_name, district_id FROM injection_stations")
             for row in cursor.fetchall():
                 name = row["injection_station_name"].strip()
-                slug = slugify(name)
-                district = BusinessDistrict.objects.filter(slug=slugify(row["district_id"].strip())).first()
+                slug = row["injection_station_id"].strip()
+                district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
                 if district:
                     _, created = InjectionSubstation.objects.get_or_create(
                         slug=slug,
@@ -90,30 +92,38 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Substations imported: {count} new entries."))
 
 
+
     def import_feeders(self, conn):
         self.stdout.write(self.style.HTTP_INFO("\nImporting Feeders..."))
         count = 0
         with conn.cursor() as cursor:
-            cursor.execute("SELECT feeder_name, injection_station_id, service_band FROM feeders")
+            cursor.execute("""
+                SELECT feeder_id, feeder_name, injection_station_id, district_id, feeder_type
+                FROM feeders
+            """)
             for row in cursor.fetchall():
                 name = row["feeder_name"].strip()
-                slug = slugify(name)
-                substation = InjectionSubstation.objects.filter(slug=slugify(row["injection_station_id"].strip())).first()
-                band_name = row["service_band"].strip()
-                band, _ = Band.objects.get_or_create(name__iexact=band_name, defaults={"name": band_name})
+                slug = row["feeder_id"].strip()
+                feeder_type = (row.get("feeder_type") or "").strip().upper()
+                voltage_level = "11kv" if "11" in feeder_type else "33kv"
 
-            if substation:
-                _, created = Feeder.objects.get_or_create(
-                    slug=slug,
-                    defaults={
-                        "name": name,
-                        "substation": substation,
-                        "band": band,
-                        "voltage_level": "11kv" if "11KV" in name.upper() else "33kv"
-                    }
-                )
-                count += int(created)
+                substation = InjectionSubstation.objects.filter(slug=row["injection_station_id"].strip()).first()
+                district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
+
+                if substation and district:
+                    _, created = Feeder.objects.get_or_create(
+                        slug=slug,
+                        defaults={
+                            "name": name,
+                            "substation": substation,
+                            "voltage_level": voltage_level,
+                            "business_district": district,
+                        }
+                    )
+                    count += int(created)
+
         self.stdout.write(self.style.SUCCESS(f"Feeders imported: {count} new entries."))
+
 
 
     def import_gl_breakdowns(self, conn):

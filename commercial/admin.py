@@ -11,28 +11,28 @@ class CustomerAdmin(admin.ModelAdmin):
 @admin.register(DailyEnergyDelivered)
 class DailyEnergyDeliveredAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'date', 'energy_mwh']
-    list_filter = ['feeder__substation__district__state', 'date']
+    list_filter = ['date',]
 
 
 @admin.register(DailyRevenueCollected)
 class DailyRevenueCollectedAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'date', 'amount']
-    list_filter = ['feeder__substation__district__state', 'date']
+    list_filter = ['date',]
 
 
 @admin.register(MonthlyEnergyBilled)
 class MonthlyEnergyBilledAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'month', 'energy_mwh']
-    list_filter = ['feeder__substation__district__state', 'month']
+    list_filter = ['month',]
 
 
 @admin.register(MonthlyRevenueBilled)
 class MonthlyRevenueBilledAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'month', 'amount']
-    list_filter = ['feeder__substation__district__state', 'month']
+    list_filter = ['month',]
 
 
 @admin.register(MonthlyCustomerStats)
 class MonthlyCustomerStatsAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'month', 'customers_billed', 'customer_response_count']
-    list_filter = ['feeder__substation__district__state', 'month']
+    list_filter = ['month',]

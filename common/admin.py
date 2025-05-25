@@ -16,23 +16,20 @@ class BusinessDistrictAdmin(admin.ModelAdmin):
 
 @admin.register(InjectionSubstation)
 class InjectionSubstationAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug', 'district']
+    list_display = ['name', 'slug',]
     search_fields = ['name', 'slug']
-    list_filter = ['district__state']
 
 
 @admin.register(Feeder)
 class FeederAdmin(admin.ModelAdmin):
     list_display = ['name', 'slug', 'substation']
     search_fields = ['name', 'slug']
-    list_filter = ['substation__district__state']
 
 
 @admin.register(DistributionTransformer)
 class DistributionTransformerAdmin(admin.ModelAdmin):
     list_display = ['name', 'slug', 'feeder']
     search_fields = ['name', 'slug']
-    list_filter = ['feeder__substation__district__state']
 
 
 @admin.register(Band)

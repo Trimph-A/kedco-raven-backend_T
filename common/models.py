@@ -56,8 +56,7 @@ class BusinessDistrict(UUIDModel, models.Model):
 
 
 class InjectionSubstation(UUIDModel, models.Model):
-    name = models.CharField(max_length=100)
-    district = models.ForeignKey(BusinessDistrict, on_delete=models.CASCADE, related_name='substations')
+    name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(unique=True, blank=True)
 
     def save(self, *args, **kwargs):
@@ -66,11 +65,8 @@ class InjectionSubstation(UUIDModel, models.Model):
         super().save(*args, **kwargs)
 
 
-    class Meta:
-        unique_together = ('name', 'district')
-
     def __str__(self):
-        return f"{self.name} - {self.district}"
+        return f"{self.name}"
 
 
 class Feeder(UUIDModel, models.Model):
