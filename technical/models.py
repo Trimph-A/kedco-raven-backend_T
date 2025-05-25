@@ -24,15 +24,20 @@ class HourlyLoad(UUIDModel, models.Model):
 
 class FeederInterruption(UUIDModel, models.Model):
     INTERRUPTION_TYPES = [
-        ('load_shedding', 'Load Shedding'),
-        ('fault', 'Fault'),
-        ('permit', 'Permit'),
-        # Add more types per DisCo
+        ("E/F", "Earth Fault"),
+        ("O/C", "Overcurrent"),
+        ("O/C & E/F", "Overcurrent and Earth Fault"),
+        ("NO RI", "No RI"),
+        ("N/A", "Not Specified"),
     ]
     feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE)
     interruption_type = models.CharField(max_length=50, choices=INTERRUPTION_TYPES)
+    description = models.TextField(blank=True, null=True)
     occurred_at = models.DateTimeField()
     restored_at = models.DateTimeField()
+
+    class Meta:
+        unique_together = ("feeder", "occurred_at", "interruption_type")
 
     @property
     def duration_hours(self):

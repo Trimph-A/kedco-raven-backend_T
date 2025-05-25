@@ -77,19 +77,30 @@ class Command(BaseCommand):
     def import_injection_stations(self, conn):
         self.stdout.write(self.style.HTTP_INFO("\nImporting Injection Substations..."))
         count = 0
+        imported_names = set()
+
         with conn.cursor() as cursor:
-            cursor.execute("SELECT injection_station_id, injection_station_name, district_id FROM injection_stations")
+            cursor.execute("SELECT injection_station_id, injection_station_name FROM injection_stations")
             for row in cursor.fetchall():
                 name = row["injection_station_name"].strip()
                 slug = row["injection_station_id"].strip()
-                district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
-                if district:
-                    _, created = InjectionSubstation.objects.get_or_create(
-                        slug=slug,
-                        defaults={"name": name, "district": district}
-                    )
-                    count += int(created)
+
+                # Skip if we've already imported a substation with this name
+                if name.lower() in imported_names:
+                    continue
+
+                _, created = InjectionSubstation.objects.get_or_create(
+                    slug=slug,
+                    defaults={"name": name}
+                )
+
+                if created:
+                    imported_names.add(name.lower())
+                    count += 1
+
         self.stdout.write(self.style.SUCCESS(f"Substations imported: {count} new entries."))
+
+
 
 
 
