@@ -474,7 +474,7 @@ class Command(BaseCommand):
     def import_daily_collections(self, conn):
         from commercial.models import DailyCollection, SalesRepresentative
 
-        self.stdout.write(self.style.HTTP_INFO("\nImporting Daily Collections from commercial_metrics..."))
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Daily Collections (by sales rep)..."))
         count = 0
         skipped = 0
 
@@ -489,23 +489,27 @@ class Command(BaseCommand):
                 date = row.get("metric_date")
                 amount = row.get("collections")
 
+                if not rep_slug or not date or amount is None:
+                    self.stdout.write(self.style.WARNING(f"Skipped row with missing values."))
+                    skipped += 1
+                    continue
+
                 rep = SalesRepresentative.objects.filter(slug=rep_slug).first()
                 if not rep:
                     self.stdout.write(self.style.WARNING(f"Sales Rep not found: {rep_slug}"))
                     skipped += 1
                     continue
 
-                # Create collection for each feeder linked to this sales rep
-                for feeder in rep.assigned_feeders.all():
-                    DailyCollection.objects.create(
-                        feeder=feeder,
-                        date=date,
-                        amount=amount,
-                        collection_type='Postpaid',  # Default assumption
-                        vendor_name='Unknown'        # Placeholder
-                    )
-                    count += 1
+                DailyCollection.objects.create(
+                    sales_rep=rep,
+                    date=date,
+                    amount=amount,
+                    collection_type='Postpaid',  # Assumed default
+                    vendor_name='N/A'        # Placeholder
+                )
+                count += 1
 
         self.stdout.write(self.style.SUCCESS(f"Daily collections imported: {count}"))
-        self.stdout.write(self.style.WARNING(f"Skipped entries (missing rep): {skipped}"))
+        self.stdout.write(self.style.WARNING(f"Skipped entries: {skipped}"))
+
 
