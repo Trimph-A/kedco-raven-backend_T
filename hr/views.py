@@ -10,7 +10,7 @@ from common.utils.filters import get_month_range_from_request
 from django.db.models import Avg, Count, Sum, Q
 from datetime import date
 from common.models import State
-from financial.models import DailyCollection
+from commercial.models import DailyCollection
 from common.utils.filters import get_month_range_from_request
 from django.shortcuts import get_object_or_404
 

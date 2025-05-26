@@ -17,12 +17,6 @@ class ExpenseSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class DailyCollectionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DailyCollection
-        fields = '__all__'
-
-
 class MonthlyRevenueBilledSerializer(serializers.ModelSerializer):
     class Meta:
         model = MonthlyRevenueBilled

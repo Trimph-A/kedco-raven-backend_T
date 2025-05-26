@@ -29,6 +29,7 @@ from commercial.views import (
     SalesRepresentativeViewSet,
     SalesRepPerformanceViewSet,
     SalesRepMetricsView,
+    DailyCollectionViewSet,
 
     CommercialMetricsSummaryView
 )
@@ -45,7 +46,6 @@ from technical.views import (
 from financial.views import (
     ExpenseCategoryViewSet,
     ExpenseViewSet,
-    DailyCollectionViewSet,
     MonthlyRevenueBilledViewSet,
     FinancialSummaryView,
 )
@@ -93,12 +93,12 @@ router.register(r'technical/hours-of-supply', DailyHoursOfSupplyViewSet, basenam
 
 router.register(r'financial/expense-categories', ExpenseCategoryViewSet, basename='expense-category')
 router.register(r'financial/expenses', ExpenseViewSet, basename='expense')
-router.register(r'financial/collections', DailyCollectionViewSet, basename='daily-collection')
 router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'financial/gl-breakdowns', GLBreakdownViewSet, basename='gl-breakdown')
 
 router.register(r'commercial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
 router.register(r'commercial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
+router.register(r'commercial/collections', DailyCollectionViewSet, basename='daily-collection')
 
 
 router.register(r'regulatory/energy-offtake', MonthlyEnergyOfftakeViewSet, basename='reg-energy-offtake')

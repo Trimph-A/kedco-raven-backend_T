@@ -38,29 +38,6 @@ class GLBreakdownViewSet(viewsets.ModelViewSet):
     serializer_class = GLBreakdownSerializer
 
 
-class DailyCollectionViewSet(viewsets.ModelViewSet):
-    serializer_class = DailyCollectionSerializer
-
-    def get_queryset(self):
-        feeders = get_filtered_feeders(self.request)
-        date_from, date_to = get_date_range_from_request(self.request, 'date')
-
-        qs = DailyCollection.objects.filter(feeder__in=feeders)
-
-        if date_from and date_to:
-            qs = qs.filter(date__range=(date_from, date_to))
-        elif date_from:
-            qs = qs.filter(date__gte=date_from)
-        elif date_to:
-            qs = qs.filter(date__lte=date_to)
-
-        collection_type = self.request.GET.get('collection_type')
-        if collection_type:
-            qs = qs.filter(collection_type=collection_type)
-
-        return qs
-
-
 class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
     serializer_class = MonthlyRevenueBilledSerializer
 

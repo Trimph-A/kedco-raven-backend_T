@@ -48,3 +48,9 @@ class SalesRepPerformanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = SalesRepPerformance
         fields = '__all__'
+
+
+class DailyCollectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DailyCollection
+        fields = '__all__'

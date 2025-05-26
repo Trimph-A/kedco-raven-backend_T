@@ -92,3 +92,18 @@ class SalesRepPerformance(UUIDModel, models.Model):
     collections_on_outstanding = models.DecimalField(max_digits=15, decimal_places=2)
     active_accounts = models.PositiveIntegerField()
     suspended_accounts = models.PositiveIntegerField()
+
+
+class DailyCollection(UUIDModel, models.Model):
+    COLLECTION_TYPE_CHOICES = (
+        ('Prepaid', 'Prepaid'),
+        ('Postpaid', 'Postpaid'),
+    )
+
+    feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE)
+    date = models.DateField()
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    collection_type = models.CharField(max_length=10, choices=COLLECTION_TYPE_CHOICES)
+    vendor_name = models.CharField(max_length=255, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
