@@ -1,14 +1,15 @@
 from django.core.management.base import BaseCommand
 from common.models import State, BusinessDistrict, InjectionSubstation, Feeder, Band
 from financial.models import Expense, ExpenseCategory, GLBreakdown
-from technical.models import HourlyLoad
+from technical.models import HourlyLoad, FeederInterruption
 from hr.models import Staff, Department, Role
 from django.utils.dateparse import parse_date
 from decouple import config
 from datetime import date, timedelta
 from django.utils.text import slugify
 from django.utils.timezone import make_aware
-import datetime
+from django.conf import settings
+from datetime import datetime, time
 import pymysql
 
 
@@ -191,30 +192,99 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Expenses imported: {count} entries."))
 
 
+
+
     def import_hourly_load(self, conn):
-        self.stdout.write(self.style.HTTP_INFO("\nImporting Hourly Load Data..."))
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Hourly Load Data (chunked by date)..."))
         count = 0
+        interruptions_created = 0
+        skipped = 0
+
         with conn.cursor() as cursor:
-            cursor.execute("SELECT feeder_id, reading_date, reading_hour, load_mw FROM hourly_load")
-            for row in cursor.fetchall():
-                feeder = Feeder.objects.filter(slug=row["feeder_id"].strip()).first()
-                load = row["load_mw"]
-                try:
-                    load_value = float(load)
-                except (ValueError, TypeError):
-                    continue
-                if feeder:
-                    reading_date = parse_date(str(row["reading_date"]))
-                    reading_hour = row["reading_hour"]
+            # Get date range
+            cursor.execute("SELECT MIN(reading_date), MAX(reading_date) FROM hourly_load")
+            result = cursor.fetchone()
+            start_date, end_date = result
 
-                    obj, created = HourlyLoad.objects.update_or_create(
-                        feeder=feeder,
-                        date=reading_date,
-                        hour=reading_hour,
-                        defaults={"load_mw": load_value}
-                    )
+            if not start_date or not end_date:
+                self.stdout.write(self.style.WARNING("⚠️ No data found in hourly_load table."))
+                return
 
-        self.stdout.write(self.style.SUCCESS(f"Hourly Load rows imported: {count} entries."))
+            current = start_date
+            while current <= end_date:
+                next_day = current + timedelta(days=1)
+
+                self.stdout.write(self.style.HTTP_INFO(f"→ Importing for {current}"))
+
+                cursor.execute("""
+                    SELECT feeder_id, reading_date, reading_hour, load_mw
+                    FROM hourly_load
+                    WHERE reading_date >= %s AND reading_date < %s
+                """, (current, next_day))
+
+                rows = cursor.fetchall()
+
+                for feeder_id, reading_date, reading_hour, load_raw in rows:
+                    feeder_slug = (feeder_id or "").strip()
+                    feeder = Feeder.objects.filter(slug=feeder_slug).first()
+
+                    if not feeder:
+                        self.stdout.write(self.style.WARNING(f"Feeder not found: {feeder_slug}"))
+                        skipped += 1
+                        continue
+
+                    try:
+                        parsed_date = parse_date(str(reading_date))
+                        if not parsed_date or reading_hour is None:
+                            raise ValueError
+                    except Exception:
+                        self.stdout.write(self.style.WARNING(
+                            f"Invalid date/hour for feeder {feeder_slug}: {reading_date}, {reading_hour}"
+                        ))
+                        skipped += 1
+                        continue
+
+                    load_str = str(load_raw).strip() if load_raw is not None else ""
+                    try:
+                        load_value = float(load_str)
+                        load_flag = None
+                    except ValueError:
+                        load_value = None
+                        load_flag = load_str.upper()
+
+                    if load_value is not None:
+                        HourlyLoad.objects.update_or_create(
+                            feeder=feeder,
+                            date=parsed_date,
+                            hour=reading_hour,
+                            defaults={"load_mw": load_value}
+                        )
+                        count += 1
+                    elif load_flag:
+                        occurred_at = datetime.combine(parsed_date, time(hour=reading_hour))
+                        if settings.USE_TZ:
+                            occurred_at = make_aware(occurred_at)
+
+                        obj, created = FeederInterruption.objects.get_or_create(
+                            feeder=feeder,
+                            occurred_at=occurred_at,
+                            interruption_type=load_flag,
+                            defaults={"description": "Logged from hourly load record"}
+                        )
+                        if created:
+                            interruptions_created += 1
+                    else:
+                        self.stdout.write(self.style.WARNING(
+                            f"Skipped: Empty or invalid load for feeder {feeder_slug} at {parsed_date} {reading_hour}"
+                        ))
+                        skipped += 1
+
+                current = next_day
+
+        self.stdout.write(self.style.SUCCESS(f"Hourly loads imported: {count}"))
+        self.stdout.write(self.style.SUCCESS(f"Interruption events created: {interruptions_created}"))
+        self.stdout.write(self.style.WARNING(f"Skipped rows: {skipped}"))
+
 
 
     def import_staff(self, conn):
