@@ -102,3 +102,18 @@ def get_sales_rep_performance_summary(request):
     )
 
     return {key: round(value, 2) if isinstance(value, float) else (value or 0) for key, value in summary.items()}
+
+def get_total_collections(request):
+    feeders = get_filtered_feeders(request)
+    date_from, date_to = get_date_range_from_request(request, 'date')
+
+    qs = DailyCollection.objects.filter(feeder__in=feeders)
+
+    if date_from and date_to:
+        qs = qs.filter(date__range=(date_from, date_to))
+    elif date_from:
+        qs = qs.filter(date__gte=date_from)
+    elif date_to:
+        qs = qs.filter(date__lte=date_to)
+
+    return qs.aggregate(total=Sum('amount'))['total'] or 0

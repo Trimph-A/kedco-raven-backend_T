@@ -6,10 +6,10 @@ from commercial.date_filters import get_date_range_from_request
 from financial.metrics import (
     get_total_cost,
     get_total_revenue_billed,
-    get_total_collections,
     get_opex_breakdown,
     get_tariff_loss,
 )
+from commercial.metrics import get_total_collections
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from financial.metrics import get_sales_rep_performance_summary
