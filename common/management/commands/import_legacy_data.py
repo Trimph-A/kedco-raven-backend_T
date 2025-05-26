@@ -41,7 +41,8 @@ class Command(BaseCommand):
             # self.import_expenses(conn)
             # self.import_hourly_load(conn)
             # self.import_staff(conn)
-            self.import_sales_reps(conn)
+            # self.import_sales_reps(conn)
+            self.import_daily_collections(conn)
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
@@ -468,3 +469,43 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Sales Reps created: {created_count}"))
         self.stdout.write(self.style.SUCCESS(f"Feeder links established: {linked_count}"))
         self.stdout.write(self.style.WARNING(f"Feeder-rep links skipped: {skipped}"))
+
+
+    def import_daily_collections(self, conn):
+        from commercial.models import DailyCollection, SalesRepresentative
+
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Daily Collections from commercial_metrics..."))
+        count = 0
+        skipped = 0
+
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT sales_rep_id, metric_date, collections
+                FROM commercial_metrics
+                WHERE collections IS NOT NULL
+            """)
+            for row in cursor.fetchall():
+                rep_slug = parse_nullable(row.get("sales_rep_id"), "").strip()
+                date = row.get("metric_date")
+                amount = row.get("collections")
+
+                rep = SalesRepresentative.objects.filter(slug=rep_slug).first()
+                if not rep:
+                    self.stdout.write(self.style.WARNING(f"Sales Rep not found: {rep_slug}"))
+                    skipped += 1
+                    continue
+
+                # Create collection for each feeder linked to this sales rep
+                for feeder in rep.assigned_feeders.all():
+                    DailyCollection.objects.create(
+                        feeder=feeder,
+                        date=date,
+                        amount=amount,
+                        collection_type='Postpaid',  # Default assumption
+                        vendor_name='Unknown'        # Placeholder
+                    )
+                    count += 1
+
+        self.stdout.write(self.style.SUCCESS(f"Daily collections imported: {count}"))
+        self.stdout.write(self.style.WARNING(f"Skipped entries (missing rep): {skipped}"))
+

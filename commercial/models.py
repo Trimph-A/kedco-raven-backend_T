@@ -100,7 +100,7 @@ class DailyCollection(UUIDModel, models.Model):
         ('Postpaid', 'Postpaid'),
     )
 
-    feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE)
+    sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
     date = models.DateField()
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     collection_type = models.CharField(max_length=10, choices=COLLECTION_TYPE_CHOICES)

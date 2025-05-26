@@ -12,7 +12,6 @@ from financial.metrics import (
 from commercial.metrics import get_total_collections
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from financial.metrics import get_sales_rep_performance_summary
 from django_filters.rest_framework import DjangoFilterBackend
 from common.mixins import DistrictLocationFilterMixin
 

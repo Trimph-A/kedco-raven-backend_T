@@ -53,5 +53,5 @@ class SalesRepPerformanceAdmin(admin.ModelAdmin):
 
 @admin.register(DailyCollection)
 class DailyCollectionAdmin(admin.ModelAdmin):
-    list_display = ['feeder', 'date', 'amount', 'collection_type', 'vendor_name']
+    list_display = ['sales_rep', 'date', 'amount', 'collection_type', 'vendor_name']
     list_filter = ['collection_type', 'date']

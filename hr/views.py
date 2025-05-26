@@ -105,10 +105,12 @@ class StaffStateOverviewView(APIView):
             turnover_rate = round((exited_count / total_staff) * 100, 2) if total_staff else 0
 
             # Collections per staff
+
             total_collection = DailyCollection.objects.filter(
-                feeder__substation__district__state=state,
+                sales_rep__assigned_feeders__substation__district__state=state,
                 date__range=(from_date, to_date)
             ).aggregate(total=Sum('amount'))['total'] or 0
+
 
             collections_per_staff = round(total_collection / active_count) if active_count else 0
 
