@@ -27,6 +27,7 @@ referencing==0.36.2
 rpds-py==0.23.1
 six==1.17.0
 sqlparse==0.5.3
+tqdm==4.67.1
 typing_extensions==4.13.0
 tzdata==2025.2
 uritemplate==4.1.1
