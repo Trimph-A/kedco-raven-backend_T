@@ -1,6 +1,5 @@
 from django.contrib import admin
-from .models import ExpenseCategory, GLBreakdown, Expense, DailyCollection, MonthlyRevenueBilled, SalesRepresentative, SalesRepPerformance
-
+from .models import ExpenseCategory, GLBreakdown, Expense, DailyCollection, MonthlyRevenueBilled
 @admin.register(ExpenseCategory)
 class ExpenseCategoryAdmin(admin.ModelAdmin):
     list_display = ['name', 'is_special']
@@ -31,13 +30,3 @@ class MonthlyRevenueBilledAdmin(admin.ModelAdmin):
     list_filter = ['month',]
 
 
-@admin.register(SalesRepresentative)
-class SalesRepresentativeAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug']
-    search_fields = ['name']
-
-
-@admin.register(SalesRepPerformance)
-class SalesRepPerformanceAdmin(admin.ModelAdmin):
-    list_display = ['sales_rep', 'month', 'current_billed', 'collections']
-    list_filter = ['sales_rep', 'month']

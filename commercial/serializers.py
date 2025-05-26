@@ -37,3 +37,14 @@ class MonthlyCustomerStatsSerializer(serializers.ModelSerializer):
     class Meta:
         model = MonthlyCustomerStats
         fields = '__all__'
+
+class SalesRepresentativeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SalesRepresentative
+        fields = '__all__'
+
+
+class SalesRepPerformanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SalesRepPerformance
+        fields = '__all__'

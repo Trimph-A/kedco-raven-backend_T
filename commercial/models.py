@@ -1,5 +1,5 @@
 from django.db import models
-from common.models import UUIDModel, DistributionTransformer, Band
+from common.models import UUIDModel, DistributionTransformer, Band, Feeder
 from django.utils import timezone
 
 class Customer(UUIDModel, models.Model):
@@ -72,3 +72,23 @@ class MonthlyCustomerStats(UUIDModel, models.Model):
 
     class Meta:
         unique_together = ('feeder', 'month')
+
+class SalesRepresentative(UUIDModel, models.Model):
+    name = models.CharField(max_length=255)
+    assigned_feeders = models.ManyToManyField(Feeder)
+    slug = models.SlugField(unique=True)
+
+    def __str__(self):
+        return self.name
+
+
+class SalesRepPerformance(UUIDModel, models.Model):
+    sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    month = models.DateField()
+    outstanding_billed = models.DecimalField(max_digits=15, decimal_places=2)
+    current_billed = models.DecimalField(max_digits=15, decimal_places=2)
+    collections = models.DecimalField(max_digits=15, decimal_places=2)
+    daily_run_rate = models.DecimalField(max_digits=15, decimal_places=2)
+    collections_on_outstanding = models.DecimalField(max_digits=15, decimal_places=2)
+    active_accounts = models.PositiveIntegerField()
+    suspended_accounts = models.PositiveIntegerField()

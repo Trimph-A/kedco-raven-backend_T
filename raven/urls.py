@@ -26,6 +26,9 @@ from commercial.views import (
     MonthlyEnergyBilledViewSet,
     MonthlyCustomerStatsViewSet,
     FeederMetricsView,
+    SalesRepresentativeViewSet,
+    SalesRepPerformanceViewSet,
+    SalesRepMetricsView,
 
     CommercialMetricsSummaryView
 )
@@ -44,10 +47,7 @@ from financial.views import (
     ExpenseViewSet,
     DailyCollectionViewSet,
     MonthlyRevenueBilledViewSet,
-    SalesRepresentativeViewSet,
-    SalesRepPerformanceViewSet,
     FinancialSummaryView,
-    SalesRepMetricsView
 )
 from financial.views import GLBreakdownViewSet
 
@@ -95,10 +95,10 @@ router.register(r'financial/expense-categories', ExpenseCategoryViewSet, basenam
 router.register(r'financial/expenses', ExpenseViewSet, basename='expense')
 router.register(r'financial/collections', DailyCollectionViewSet, basename='daily-collection')
 router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
-router.register(r'financial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
-router.register(r'financial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
 router.register(r'financial/gl-breakdowns', GLBreakdownViewSet, basename='gl-breakdown')
 
+router.register(r'commercial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
+router.register(r'commercial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
 
 
 router.register(r'regulatory/energy-offtake', MonthlyEnergyOfftakeViewSet, basename='reg-energy-offtake')

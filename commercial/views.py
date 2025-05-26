@@ -195,3 +195,35 @@ class CommercialMetricsSummaryView(APIView):
     def get(self, request):
         metrics = calculate_derived_metrics(request)
         return Response(metrics)
+    
+
+
+class SalesRepresentativeViewSet(viewsets.ModelViewSet):
+    queryset = SalesRepresentative.objects.all()
+    serializer_class = SalesRepresentativeSerializer
+
+
+class SalesRepPerformanceViewSet(viewsets.ModelViewSet):
+    serializer_class = SalesRepPerformanceSerializer
+
+    def get_queryset(self):
+        qs = SalesRepPerformance.objects.all()
+        sales_rep_slug = self.request.GET.get('sales_rep')
+
+        if sales_rep_slug:
+            qs = qs.filter(sales_rep__slug=sales_rep_slug)
+
+        month_from, month_to = get_date_range_from_request(self.request, 'month')
+        if month_from and month_to:
+            qs = qs.filter(month__range=(month_from, month_to))
+        elif month_from:
+            qs = qs.filter(month__gte=month_from)
+        elif month_to:
+            qs = qs.filter(month__lte=month_to)
+
+        return qs
+
+class SalesRepMetricsView(APIView):
+    def get(self, request):
+        data = get_sales_rep_performance_summary(request)
+        return Response(data)

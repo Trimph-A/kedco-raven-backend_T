@@ -32,15 +32,16 @@ class Command(BaseCommand):
         )
 
         with conn:
-            self.import_states(conn)
-            self.import_districts(conn)
-            self.import_injection_stations(conn)
-            self.import_feeders(conn)
-            self.import_feeder_interruptions(conn)
-            self.import_gl_breakdowns(conn)
-            self.import_expenses(conn)
-            self.import_hourly_load(conn)
-            self.import_staff(conn)
+            # self.import_states(conn)
+            # self.import_districts(conn)
+            # self.import_injection_stations(conn)
+            # self.import_feeders(conn)
+            # self.import_feeder_interruptions(conn)
+            # self.import_gl_breakdowns(conn)
+            # self.import_expenses(conn)
+            # self.import_hourly_load(conn)
+            # self.import_staff(conn)
+            self.import_sales_reps(conn)
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
@@ -412,3 +413,58 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Feeder interruptions imported: {count} entries."))
         self.stdout.write(self.style.WARNING(f"Skipped: {skipped} rows (e.g., missing feeder)"))
+
+
+
+    def import_sales_reps(self, conn):
+        from commercial.models import SalesRepresentative
+        from common.models import Feeder
+
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Sales Representatives and assigning feeders..."))
+        created_count = 0
+        linked_count = 0
+        skipped = 0
+
+        with conn.cursor() as cursor:
+            # We'll process unique sales reps and their feeder links
+            cursor.execute("SELECT DISTINCT sales_rep_id, sales_rep_name FROM sales_rep_feeder_map")
+            reps = cursor.fetchall()
+
+            for row in reps:
+                slug = parse_nullable(row.get("sales_rep_id"), "").strip()
+                name = parse_nullable(row.get("sales_rep_name"), "").strip()
+
+                if not slug or not name:
+                    self.stdout.write(self.style.WARNING("Skipping row with missing ID or name."))
+                    continue
+
+                rep, created = SalesRepresentative.objects.get_or_create(
+                    slug=slug,
+                    defaults={"name": name}
+                )
+                created_count += int(created)
+
+            # Now fetch and assign feeders
+            cursor.execute("SELECT sales_rep_id, feeder_id FROM sales_rep_feeder_map")
+            mapping_rows = cursor.fetchall()
+
+            for row in mapping_rows:
+                rep_slug = parse_nullable(row.get("sales_rep_id"), "").strip()
+                feeder_slug = parse_nullable(row.get("feeder_id"), "").strip()
+
+                rep = SalesRepresentative.objects.filter(slug=rep_slug).first()
+                feeder = Feeder.objects.filter(slug=feeder_slug).first()
+
+                if not rep or not feeder:
+                    self.stdout.write(self.style.WARNING(
+                        f"Could not assign feeder {feeder_slug} to rep {rep_slug} — missing entity."
+                    ))
+                    skipped += 1
+                    continue
+
+                rep.assigned_feeders.add(feeder)
+                linked_count += 1
+
+        self.stdout.write(self.style.SUCCESS(f"Sales Reps created: {created_count}"))
+        self.stdout.write(self.style.SUCCESS(f"Feeder links established: {linked_count}"))
+        self.stdout.write(self.style.WARNING(f"Feeder-rep links skipped: {skipped}"))

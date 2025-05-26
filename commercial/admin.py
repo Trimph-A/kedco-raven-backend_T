@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Customer, DailyEnergyDelivered, DailyRevenueCollected, MonthlyEnergyBilled, MonthlyRevenueBilled, MonthlyCustomerStats
+from .models import Customer, DailyEnergyDelivered, DailyRevenueCollected, MonthlyEnergyBilled, MonthlyRevenueBilled, MonthlyCustomerStats, SalesRepresentative, SalesRepPerformance
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
@@ -36,3 +36,14 @@ class MonthlyRevenueBilledAdmin(admin.ModelAdmin):
 class MonthlyCustomerStatsAdmin(admin.ModelAdmin):
     list_display = ['feeder', 'month', 'customers_billed', 'customer_response_count']
     list_filter = ['month',]
+
+@admin.register(SalesRepresentative)
+class SalesRepresentativeAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug']
+    search_fields = ['name']
+
+
+@admin.register(SalesRepPerformance)
+class SalesRepPerformanceAdmin(admin.ModelAdmin):
+    list_display = ['sales_rep', 'month', 'current_billed', 'collections']
+    list_filter = ['sales_rep', 'month']
