@@ -107,3 +107,19 @@ class DailyCollection(UUIDModel, models.Model):
     vendor_name = models.CharField(max_length=255, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class MonthlyCommercialSummary(UUIDModel):
+    sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    month = models.DateField()
+
+    customers_billed = models.PositiveIntegerField(default=0)
+    customers_responded = models.PositiveIntegerField(default=0)
+
+    revenue_billed = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    revenue_collected = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("sales_rep", "month")

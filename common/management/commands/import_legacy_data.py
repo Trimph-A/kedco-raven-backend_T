@@ -38,12 +38,14 @@ class Command(BaseCommand):
             # self.import_feeders(conn)
             # self.import_feeder_interruptions(conn)
             # self.import_gl_breakdowns(conn)
-            self.import_expenses(conn)
+            # self.import_expenses(conn)
             # self.import_hourly_load(conn)
             # self.import_staff(conn)
             # self.import_sales_reps(conn)
             # self.import_daily_collections(conn)
             # self.import_energy_delivered(conn)
+            self.import_monthly_commercial_summary(conn)
+
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
@@ -556,3 +558,38 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Energy Delivered imported: {count}"))
         self.stdout.write(self.style.WARNING(f"Skipped rows: {skipped}"))
+
+
+    def import_monthly_commercial_summary(self, conn):
+        from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Monthly Commercial Summary..."))
+        count = 0
+        skipped = 0
+
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT sales_rep_id, metric_date, pop, response, billed, collections
+                FROM commercial_metrics
+            """)
+            for row in cursor.fetchall():
+                sales_rep_id = row["sales_rep_id"].strip()
+                sales_rep = SalesRepresentative.objects.filter(slug=sales_rep_id).first()
+
+                if not sales_rep:
+                    self.stdout.write(self.style.WARNING(f"Skipping row - Sales Rep not found: {sales_rep_id}"))
+                    skipped += 1
+                    continue
+
+                summary, created = MonthlyCommercialSummary.objects.update_or_create(
+                    sales_rep=sales_rep,
+                    month=row["metric_date"],
+                    defaults={
+                        "customers_billed": row["pop"] or 0,
+                        "customers_responded": row["response"] or 0,
+                        "revenue_billed": row["billed"] or 0,
+                        "revenue_collected": row["collections"] or 0,
+                    }
+                )
+                count += int(created)
+
+        self.stdout.write(self.style.SUCCESS(f"Monthly Commercial Summary imported: {count} entries. Skipped: {skipped}"))
