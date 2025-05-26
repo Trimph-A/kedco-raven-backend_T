@@ -19,6 +19,7 @@ from commercial.models import DailyCollection
 from django.utils.dateparse import parse_date
 from datetime import date
 from dateutil.relativedelta import relativedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class CustomerViewSet(viewsets.ViewSet):
@@ -298,13 +299,13 @@ def commercial_all_states_view(request):
 
     for state in State.objects.all():
         filter_by_state_and_date = {
-            "feeder__district__state": state,
+            "feeder__business_district__state": state,
             "date__gte": period_start,
             "date__lt": period_end,
         }
 
         delivered_sum = EnergyDelivered.objects.filter(
-            feeder__district__state__name=state,
+            feeder__business_district__state=state,
             date__gte=period_start,
             date__lt=period_end
         ).aggregate(total=Sum("energy_mwh"))
@@ -314,18 +315,50 @@ def commercial_all_states_view(request):
 
         billed = (
             MonthlyRevenueBilled.objects.filter(
-                feeder__district__state=state,
+                feeder__business_district__state=state,
                 month__year=period_start.year,
                 month__month=period_start.month,
             )
             .aggregate(Sum("amount"))["amount__sum"]
             or Decimal(0)
         )
-        collected = (
-            DailyCollection.objects.filter(**filter_by_state_and_date)
-            .aggregate(Sum("amount"))["amount__sum"]
-            or Decimal(0)
+
+        # To get the energy collected
+        # 1. Get revenue billed (₦)
+        revenue_billed = MonthlyRevenueBilled.objects.filter(
+            feeder__business_district__state=state,
+            month__year=period_start.year,
+            month__month=period_start.month
+        ).aggregate(total=Sum("amount"))["total"] or Decimal(0)
+
+        # 2. Get revenue collected (₦)
+        reps_in_state = SalesRepresentative.objects.filter(
+            assigned_feeders__business_district__state=state
+        ).distinct()
+
+        revenue_collected = DailyCollection.objects.filter(
+            sales_rep__in=reps_in_state,
+            date__gte=period_start,
+            date__lt=period_end
+        ).aggregate(total=Sum("amount"))["total"] or Decimal(0)
+
+        # 3. Get energy billed (MWh)
+        energy_billed = EnergyDelivered.objects.filter(
+            feeder__business_district__state=state,
+            date__gte=period_start,
+            date__lt=period_end
+        ).aggregate(total=Sum("energy_mwh"))["total"] or Decimal(0)
+
+        # 4. Calculate collection efficiency
+        collection_efficiency = (
+            (revenue_collected / revenue_billed) if revenue_billed else Decimal(0)
         )
+
+        # 5. Estimate energy collected
+        energy_collected = (collection_efficiency * energy_billed).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+
 
         # customer_records = CustomerRecord.objects.filter(
         #     district__state=state
@@ -333,7 +366,7 @@ def commercial_all_states_view(request):
 
         try:
             billing_eff = (Decimal(billed) / Decimal(delivered)) if delivered else Decimal(0)
-            collection_eff = (Decimal(collected) / Decimal(billed)) if billed else Decimal(0)
+            collection_eff = (Decimal(energy_collected) / Decimal(billed)) if billed else Decimal(0)
             atcc = (billing_eff * collection_eff) * Decimal("100")
 
             billing_eff *= Decimal("100")
@@ -362,7 +395,7 @@ def commercial_all_states_view(request):
             "state": state.name,
             "energy_delivered": float(delivered),
             "energy_billed": float(billed),
-            "energy_collected": float(collected),
+            "energy_collected": float(energy_collected),
             "atcc": {"actual": float(atcc), "target": 65},  # Target is placeholder
             "billing_efficiency": {"actual": float(billing_eff), "target": 75},
             "collection_efficiency": {"actual": float(collection_eff), "target": 70},
