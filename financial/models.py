@@ -57,7 +57,7 @@ class MonthlyRevenueBilled(UUIDModel, models.Model):
 
 class SalesRepresentative(UUIDModel, models.Model):
     name = models.CharField(max_length=255)
-    assigned_transformers = models.ManyToManyField(DistributionTransformer)
+    assigned_feeders = models.ManyToManyField(Feeder)
     slug = models.SlugField(unique=True)
 
     def __str__(self):

@@ -81,7 +81,7 @@ def get_tariff_loss(request):
 
 def get_sales_rep_performance_summary(request):
     sales_rep_slug = request.GET.get('sales_rep')
-    transformer_slug = request.GET.get('transformer')
+    feeder_slug = request.GET.get('feeder')
     month_from, month_to = get_date_range_from_request(request, 'month')
 
     qs = SalesRepPerformance.objects.all()
@@ -96,8 +96,8 @@ def get_sales_rep_performance_summary(request):
     elif month_to:
         qs = qs.filter(month__lte=month_to)
 
-    if transformer_slug:
-        qs = qs.filter(sales_rep__assigned_transformers__slug=transformer_slug)
+    if feeder_slug:
+        qs = qs.filter(sales_rep__assigned_feeders__slug=transformer_slug)
 
     summary = qs.aggregate(
         total_outstanding_billed=Sum('outstanding_billed'),
