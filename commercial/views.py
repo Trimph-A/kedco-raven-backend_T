@@ -10,7 +10,7 @@ from .utils import get_filtered_feeders
 from commercial.date_filters import get_date_range_from_request
 from commercial.mixins import FeederFilteredQuerySetMixin
 from commercial.utils import get_filtered_customers
-from commercial.metrics import calculate_derived_metrics
+from commercial.metrics import calculate_derived_metrics, get_sales_rep_performance_summary
 
 
 class CustomerViewSet(viewsets.ViewSet):
