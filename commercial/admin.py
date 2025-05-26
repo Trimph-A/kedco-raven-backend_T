@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (Customer, DailyEnergyDelivered, DailyRevenueCollected,
                      MonthlyEnergyBilled, MonthlyRevenueBilled, MonthlyCustomerStats,
-                     SalesRepresentative, SalesRepPerformance, DailyCollection)
+                     SalesRepresentative, SalesRepPerformance, DailyCollection,
+                     MonthlyCommercialSummary)
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
@@ -55,3 +56,7 @@ class SalesRepPerformanceAdmin(admin.ModelAdmin):
 class DailyCollectionAdmin(admin.ModelAdmin):
     list_display = ['sales_rep', 'date', 'amount', 'collection_type', 'vendor_name']
     list_filter = ['collection_type', 'date']
+
+@admin.register(MonthlyCommercialSummary)
+class MonthlyCommercialSummaryAdmin(admin.ModelAdmin):
+    list_display = ['sales_rep', 'month', 'customers_billed', 'customers_responded', 'revenue_billed', 'revenue_collected',]
