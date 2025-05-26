@@ -31,7 +31,9 @@ from commercial.views import (
     SalesRepMetricsView,
     DailyCollectionViewSet,
 
-    CommercialMetricsSummaryView
+    CommercialMetricsSummaryView,
+    CommercialOverviewAPIView,
+    commercial_all_states_view,
 )
 
 from technical.views import (
@@ -126,7 +128,9 @@ urlpatterns = [
     path('api/metrics/hr-summary/', HRMetricsSummaryView.as_view(), name='hr-summary'),
     path('api/metrics/staff-summary/', StaffSummaryView.as_view(), name='staff-summary'),
     path('api/metrics/staff/state-overview/', StaffStateOverviewView.as_view(), name='staff-state-overview'),
-     path("api/metrics/staff/state-overview/<slug:slug>/", StaffStateDetailView.as_view(), name="staff-state-detail"),
+    path("api/metrics/staff/state-overview/<slug:slug>/", StaffStateDetailView.as_view(), name="staff-state-detail"),
+    path('api/metrics/commercial/overview/', CommercialOverviewAPIView.as_view(), name='commercial-overview'),
+    path('api/metrics/commercial/all-states/',commercial_all_states_view, name='commercial-all-states-view'),
 
 
 ]

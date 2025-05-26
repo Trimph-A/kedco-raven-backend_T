@@ -38,11 +38,12 @@ class Command(BaseCommand):
             # self.import_feeders(conn)
             # self.import_feeder_interruptions(conn)
             # self.import_gl_breakdowns(conn)
-            # self.import_expenses(conn)
+            self.import_expenses(conn)
             # self.import_hourly_load(conn)
             # self.import_staff(conn)
             # self.import_sales_reps(conn)
-            self.import_daily_collections(conn)
+            # self.import_daily_collections(conn)
+            # self.import_energy_delivered(conn)
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
@@ -513,3 +514,45 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING(f"Skipped entries: {skipped}"))
 
 
+    def import_energy_delivered(self, conn):
+        from technical.models import EnergyDelivered
+        from common.models import Feeder
+        from tqdm import tqdm  # Ensure tqdm is installed
+
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Energy Delivered..."))
+        count = 0
+        skipped = 0
+
+        with conn.cursor() as cursor:
+            # Get total count for progress bar
+            cursor.execute("SELECT COUNT(*) as total FROM daily_energy_readings")
+            total_rows = cursor.fetchone()['total']
+
+            # Fetch all rows
+            cursor.execute("SELECT feeder_id, energy_date, energy_kwh FROM daily_energy_readings")
+
+            for row in tqdm(cursor.fetchall(), total=total_rows, desc="Importing Energy Readings"):
+                feeder_slug = parse_nullable(row.get("feeder_id"), "").strip()
+                date = row.get("energy_date")
+                mwh = row.get("energy_kwh")  # Already in MWh
+
+                feeder = Feeder.objects.filter(slug=feeder_slug).first()
+                if not feeder or not date or mwh is None:
+                    skipped += 1
+                    continue
+
+                try:
+                    mwh_value = round(float(mwh), 2)
+                except (ValueError, TypeError):
+                    skipped += 1
+                    continue
+
+                EnergyDelivered.objects.update_or_create(
+                    feeder=feeder,
+                    date=date,
+                    defaults={"energy_mwh": mwh_value}
+                )
+                count += 1
+
+        self.stdout.write(self.style.SUCCESS(f"Energy Delivered imported: {count}"))
+        self.stdout.write(self.style.WARNING(f"Skipped rows: {skipped}"))

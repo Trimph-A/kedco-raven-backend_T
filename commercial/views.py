@@ -4,13 +4,21 @@ from .serializers import *
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Sum, F, FloatField, ExpressionWrapper, Q
-from common.models import Feeder
+from common.models import Feeder, State
 from datetime import datetime
 from .utils import get_filtered_feeders
 from commercial.date_filters import get_date_range_from_request
 from commercial.mixins import FeederFilteredQuerySetMixin
 from commercial.utils import get_filtered_customers
 from commercial.metrics import calculate_derived_metrics, get_sales_rep_performance_summary
+from rest_framework.decorators import api_view
+from decimal import Decimal, InvalidOperation
+from technical.models import EnergyDelivered
+from financial.models import MonthlyRevenueBilled
+from commercial.models import DailyCollection
+from django.utils.dateparse import parse_date
+from datetime import date
+from dateutil.relativedelta import relativedelta
 
 
 class CustomerViewSet(viewsets.ViewSet):
@@ -250,3 +258,117 @@ class DailyCollectionViewSet(viewsets.ModelViewSet):
             qs = qs.filter(collection_type=collection_type)
 
         return qs
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from commercial.analytics import get_commercial_overview_data
+
+class CommercialOverviewAPIView(APIView):
+    def get(self, request):
+        # Parse optional date range filters (monthly or range)
+        mode = request.query_params.get('mode', 'monthly')
+        year = int(request.query_params.get('year', 2023))
+        month = int(request.query_params.get('month', 1))
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+
+        data = get_commercial_overview_data(mode, year, month, from_date, to_date)
+        return Response(data)
+
+
+
+@api_view(["GET"])
+def commercial_all_states_view(request):
+    mode = request.query_params.get("mode", "monthly")
+    year = int(request.query_params.get("year", date.today().year))
+    month = int(request.query_params.get("month", date.today().month))
+    from_date = request.query_params.get("from_date")
+    to_date = request.query_params.get("to_date")
+
+    # Pick date logic
+    if mode == "monthly":
+        period_start = date(year, month, 1)
+        period_end = period_start + relativedelta(months=1)
+    else:
+        period_start = parse_date(from_date) or date.today().replace(day=1)
+        period_end = parse_date(to_date) or date.today()
+
+    results = []
+
+    for state in State.objects.all():
+        filter_by_state_and_date = {
+            "feeder__district__state": state,
+            "date__gte": period_start,
+            "date__lt": period_end,
+        }
+
+        delivered_sum = EnergyDelivered.objects.filter(
+            feeder__district__state__name=state,
+            date__gte=period_start,
+            date__lt=period_end
+        ).aggregate(total=Sum("energy_mwh"))
+
+        delivered = Decimal(delivered_sum.get("total") or 0)
+
+
+        billed = (
+            MonthlyRevenueBilled.objects.filter(
+                feeder__district__state=state,
+                month__year=period_start.year,
+                month__month=period_start.month,
+            )
+            .aggregate(Sum("amount"))["amount__sum"]
+            or Decimal(0)
+        )
+        collected = (
+            DailyCollection.objects.filter(**filter_by_state_and_date)
+            .aggregate(Sum("amount"))["amount__sum"]
+            or Decimal(0)
+        )
+
+        # customer_records = CustomerRecord.objects.filter(
+        #     district__state=state
+        # ).aggregate(Sum("revenue_billed"), Sum("collections"), Sum("total_customers"))
+
+        try:
+            billing_eff = (Decimal(billed) / Decimal(delivered)) if delivered else Decimal(0)
+            collection_eff = (Decimal(collected) / Decimal(billed)) if billed else Decimal(0)
+            atcc = (billing_eff * collection_eff) * Decimal("100")
+
+            billing_eff *= Decimal("100")
+            collection_eff *= Decimal("100")
+        except (InvalidOperation, ZeroDivisionError):
+            atcc = billing_eff = collection_eff = Decimal(0)
+
+        # revenue_per_customer = (
+        #     Decimal(customer_records["revenue_billed__sum"] or 0) /
+        #     Decimal(customer_records["total_customers__sum"] or 1)
+        # )
+        # collection_per_customer = (
+        #     Decimal(customer_records["collections__sum"] or 0) /
+        #     Decimal(customer_records["total_customers__sum"] or 1)
+        # )
+
+        # response_record = CustomerResponse.objects.filter(state=state, date__gte=period_start, date__lt=period_end)
+        # total = response_record.aggregate(Sum("total_requests"))["total_requests__sum"] or 0
+        # resolved = response_record.aggregate(Sum("resolved"))["resolved__sum"] or 0
+        # try:
+        #     response_rate = Decimal(resolved) / Decimal(total) * Decimal(100) if total else Decimal(0)
+        # except (InvalidOperation, ZeroDivisionError):
+        #     response_rate = Decimal(0)
+
+        results.append({
+            "state": state.name,
+            "energy_delivered": float(delivered),
+            "energy_billed": float(billed),
+            "energy_collected": float(collected),
+            "atcc": {"actual": float(atcc), "target": 65},  # Target is placeholder
+            "billing_efficiency": {"actual": float(billing_eff), "target": 75},
+            "collection_efficiency": {"actual": float(collection_eff), "target": 70},
+            # "customer_response_rate": {"actual": float(response_rate), "target": 67},
+            # "revenue_billed_per_customer": float(revenue_per_customer),
+            # "collections_per_customer": float(collection_per_customer),
+        })
+
+    return Response(results)
