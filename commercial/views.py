@@ -21,6 +21,9 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal, ROUND_HALF_UP
 
+def round_two_places(value):
+    return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
 
 class CustomerViewSet(viewsets.ViewSet):
     """
@@ -287,7 +290,6 @@ def commercial_all_states_view(request):
     from_date = request.query_params.get("from_date")
     to_date = request.query_params.get("to_date")
 
-    # Pick date logic
     if mode == "monthly":
         period_start = date(year, month, 1)
         period_end = period_start + relativedelta(months=1)
@@ -298,110 +300,71 @@ def commercial_all_states_view(request):
     results = []
 
     for state in State.objects.all():
-        filter_by_state_and_date = {
-            "feeder__business_district__state": state,
-            "date__gte": period_start,
-            "date__lt": period_end,
-        }
-
-        delivered_sum = EnergyDelivered.objects.filter(
-            feeder__business_district__state=state,
-            date__gte=period_start,
-            date__lt=period_end
-        ).aggregate(total=Sum("energy_mwh"))
-
-        delivered = Decimal(delivered_sum.get("total") or 0)
-
-
-        billed = (
-            MonthlyRevenueBilled.objects.filter(
-                feeder__business_district__state=state,
-                month__year=period_start.year,
-                month__month=period_start.month,
-            )
-            .aggregate(Sum("amount"))["amount__sum"]
-            or Decimal(0)
-        )
-
-        # To get the energy collected
-        # 1. Get revenue billed (₦)
-        revenue_billed = MonthlyRevenueBilled.objects.filter(
-            feeder__business_district__state=state,
-            month__year=period_start.year,
-            month__month=period_start.month
-        ).aggregate(total=Sum("amount"))["total"] or Decimal(0)
-
-        # 2. Get revenue collected (₦)
-        reps_in_state = SalesRepresentative.objects.filter(
-            assigned_feeders__business_district__state=state
+        # Get commercial summaries in this state
+        summaries = MonthlyCommercialSummary.objects.filter(
+            sales_rep__assigned_feeders__business_district__state=state,
+            month__gte=period_start,
+            month__lt=period_end,
         ).distinct()
 
-        revenue_collected = DailyCollection.objects.filter(
-            sales_rep__in=reps_in_state,
-            date__gte=period_start,
-            date__lt=period_end
-        ).aggregate(total=Sum("amount"))["total"] or Decimal(0)
+        revenue_billed = summaries.aggregate(Sum("revenue_billed"))["revenue_billed__sum"] or Decimal(0)
+        revenue_collected = summaries.aggregate(Sum("revenue_collected"))["revenue_collected__sum"] or Decimal(0)
+        customers_billed = summaries.aggregate(Sum("customers_billed"))["customers_billed__sum"] or 0
+        customers_responded = summaries.aggregate(Sum("customers_responded"))["customers_responded__sum"] or 0
 
-        # 3. Get energy billed (MWh)
-        energy_billed = EnergyDelivered.objects.filter(
+        # Get energy delivered for the state
+        delivered = EnergyDelivered.objects.filter(
             feeder__business_district__state=state,
             date__gte=period_start,
             date__lt=period_end
         ).aggregate(total=Sum("energy_mwh"))["total"] or Decimal(0)
 
-        # 4. Calculate collection efficiency
-        collection_efficiency = (
-            (revenue_collected / revenue_billed) if revenue_billed else Decimal(0)
+        # Estimate energy collected
+        collection_efficiency_ratio = (
+            revenue_collected / revenue_billed if revenue_billed else Decimal(0)
         )
-
-        # 5. Estimate energy collected
-        energy_collected = (collection_efficiency * energy_billed).quantize(
+        energy_collected = (collection_efficiency_ratio * delivered).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
-
-        # customer_records = CustomerRecord.objects.filter(
-        #     district__state=state
-        # ).aggregate(Sum("revenue_billed"), Sum("collections"), Sum("total_customers"))
-
+        # Calculate billing, collection efficiency, and ATCC
         try:
-            billing_eff = (Decimal(billed) / Decimal(delivered)) if delivered else Decimal(0)
-            collection_eff = (Decimal(energy_collected) / Decimal(billed)) if billed else Decimal(0)
-            atcc = (billing_eff * collection_eff) * Decimal("100")
+            # estimated_tariff = (revenue_billed / (delivered * 1000)) if delivered else Decimal(0)
+            billing_eff = ((revenue_billed/50) / delivered) if delivered else Decimal(0)
+            collection_eff = (revenue_collected / revenue_billed) if revenue_billed else Decimal(0)
+            atcc = (billing_eff * collection_eff) * Decimal(100)
 
             billing_eff *= Decimal("100")
             collection_eff *= Decimal("100")
         except (InvalidOperation, ZeroDivisionError):
             atcc = billing_eff = collection_eff = Decimal(0)
 
-        # revenue_per_customer = (
-        #     Decimal(customer_records["revenue_billed__sum"] or 0) /
-        #     Decimal(customer_records["total_customers__sum"] or 1)
-        # )
-        # collection_per_customer = (
-        #     Decimal(customer_records["collections__sum"] or 0) /
-        #     Decimal(customer_records["total_customers__sum"] or 1)
-        # )
+        # Per customer metrics
+        revenue_per_customer = (
+            revenue_billed / customers_billed if customers_billed else Decimal(0)
+        )
+        collection_per_customer = (
+            revenue_collected / customers_billed if customers_billed else Decimal(0)
+        )
 
-        # response_record = CustomerResponse.objects.filter(state=state, date__gte=period_start, date__lt=period_end)
-        # total = response_record.aggregate(Sum("total_requests"))["total_requests__sum"] or 0
-        # resolved = response_record.aggregate(Sum("resolved"))["resolved__sum"] or 0
-        # try:
-        #     response_rate = Decimal(resolved) / Decimal(total) * Decimal(100) if total else Decimal(0)
-        # except (InvalidOperation, ZeroDivisionError):
-        #     response_rate = Decimal(0)
+        # Response rate
+        response_rate = (
+            (Decimal(customers_responded) / Decimal(customers_billed)) * Decimal(100)
+            if customers_billed else Decimal(0)
+        )
+
 
         results.append({
             "state": state.name,
-            "energy_delivered": float(delivered),
-            "energy_billed": float(billed),
-            "energy_collected": float(energy_collected),
-            "atcc": {"actual": float(atcc), "target": 65},  # Target is placeholder
-            "billing_efficiency": {"actual": float(billing_eff), "target": 75},
-            "collection_efficiency": {"actual": float(collection_eff), "target": 70},
-            # "customer_response_rate": {"actual": float(response_rate), "target": 67},
-            # "revenue_billed_per_customer": float(revenue_per_customer),
-            # "collections_per_customer": float(collection_per_customer),
+            "energy_delivered": float(round_two_places(delivered)),
+            "energy_billed": float(round_two_places(revenue_billed)),
+            "energy_collected": float(round_two_places(energy_collected)),
+            "atcc": {"actual": float(round_two_places(atcc)), "target": 65},  # placeholder target
+            "billing_efficiency": {"actual": float(round_two_places(billing_eff)), "target": 75},
+            "collection_efficiency": {"actual": float(round_two_places(collection_eff)), "target": 70},
+            "customer_response_rate": {"actual": float(round_two_places(response_rate)), "target": 67},
+            "revenue_billed_per_customer": float(round_two_places(revenue_per_customer)),
+            "collections_per_customer": float(round_two_places(collection_per_customer)),
         })
 
     return Response(results)
