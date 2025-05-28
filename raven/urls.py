@@ -34,6 +34,8 @@ from commercial.views import (
     CommercialMetricsSummaryView,
     CommercialOverviewAPIView,
     commercial_all_states_view,
+    commercial_state_metrics_view,
+    commercial_all_business_districts_view,
 )
 
 from technical.views import (
@@ -131,6 +133,8 @@ urlpatterns = [
     path("api/metrics/staff/state-overview/<slug:slug>/", StaffStateDetailView.as_view(), name="staff-state-detail"),
     path('api/metrics/commercial/overview/', CommercialOverviewAPIView.as_view(), name='commercial-overview'),
     path('api/metrics/commercial/all-states/',commercial_all_states_view, name='commercial-all-states-view'),
+    path('api/metrics/commercial/state/',commercial_state_metrics_view, name='commercial-state-view'),
+    path('api/metrics/commercial/business-districts/',commercial_all_business_districts_view, name='commercial-business-districts-view'),
 
 
 ]

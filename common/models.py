@@ -79,7 +79,7 @@ class Feeder(UUIDModel, models.Model):
     band = models.ForeignKey(Band, on_delete=models.SET_NULL, null=True)
     voltage_level = models.CharField(max_length=10, choices=FEEDER_VOLTAGE_CHOICES)
     substation = models.ForeignKey(InjectionSubstation, on_delete=models.CASCADE, related_name='feeders')
-    business_district = models.ForeignKey('BusinessDistrict', on_delete=models.CASCADE)
+    business_district = models.ForeignKey('BusinessDistrict', on_delete=models.CASCADE, related_name='feeders', null=True, blank=True)
     slug = models.SlugField(unique=True, blank=True)
 
     def save(self, *args, **kwargs):

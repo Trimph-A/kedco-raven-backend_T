@@ -4,7 +4,7 @@ from .serializers import *
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Sum, F, FloatField, ExpressionWrapper, Q
-from common.models import Feeder, State
+from common.models import Feeder, State, BusinessDistrict
 from datetime import datetime
 from .utils import get_filtered_feeders
 from commercial.date_filters import get_date_range_from_request
@@ -368,3 +368,155 @@ def commercial_all_states_view(request):
         })
 
     return Response(results)
+
+
+
+@api_view(["GET"])
+def commercial_state_metrics_view(request):
+    state_name = request.query_params.get("state")
+    mode = request.query_params.get("mode", "monthly")
+    year = int(request.query_params.get("year", date.today().year))
+    month = int(request.query_params.get("month", date.today().month))
+    from_date = request.query_params.get("from_date")
+    to_date = request.query_params.get("to_date")
+
+    state = State.objects.filter(name__iexact=state_name).first()
+    if not state:
+        return Response({"error": "Invalid state"}, status=400)
+
+    def generate_month_list(reference_date):
+        return [reference_date - relativedelta(months=i) for i in range(4, -1, -1)]
+
+    selected_date = (
+        date(year, month, 1) if mode == "monthly" else parse_date(to_date) or date.today()
+    )
+    months = generate_month_list(selected_date)
+
+    data = []
+
+    for m in months:
+        reps = SalesRepresentative.objects.filter(
+            assigned_feeders__business_district__state=state
+        ).distinct()
+
+        summaries = MonthlyCommercialSummary.objects.filter(
+            sales_rep__in=reps,
+            month__year=m.year,
+            month__month=m.month,
+        )
+
+        delivered = EnergyDelivered.objects.filter(
+            feeder__business_district__state=state,
+            date__year=m.year,
+            date__month=m.month,
+        ).aggregate(Sum("energy_mwh"))["energy_mwh__sum"] or Decimal(0)
+
+        summary_totals = summaries.aggregate(
+            revenue_collected=Sum("revenue_collected"),
+            revenue_billed=Sum("revenue_billed"),
+            customers_billed=Sum("customers_billed"),
+            customers_responded=Sum("customers_responded"),
+        )
+
+        revenue_collected = summary_totals["revenue_collected"] or Decimal(0)
+        revenue_billed = summary_totals["revenue_billed"] or Decimal(0)
+        customers_billed = summary_totals["customers_billed"] or 1  # Avoid divide by zero
+        customers_responded = summary_totals["customers_responded"] or 0
+
+        # Metrics
+        collection_eff = (
+            (revenue_collected / revenue_billed) * 100
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if revenue_billed else Decimal(0)
+
+        billing_eff = (
+            ((revenue_billed/50) / delivered) * 100
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if delivered else Decimal(0)
+
+        atcc = (
+            (billing_eff * collection_eff / 100)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        energy_collected = (
+            (delivered * collection_eff / 100)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        response_rate = (
+            (Decimal(customers_responded) / Decimal(customers_billed)) * 100
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if customers_billed else Decimal(0)
+
+        revenue_per_customer = (
+            revenue_billed / Decimal(customers_billed)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        collection_per_customer = (
+            revenue_collected / Decimal(customers_billed)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        data.append({
+            "month": m.strftime("%b"),
+            "energy_delivered": float(delivered),
+            "revenue_billed": float(revenue_billed),  # Still money
+            "energy_collected": float(energy_collected),  # Energy estimated from delivery × CE
+            "billing_efficiency": float(billing_eff),
+            "collection_efficiency": float(collection_eff),
+            "atcc": float(atcc),
+            "customer_response_rate": float(response_rate),
+            "revenue_billed_per_customer": float(revenue_per_customer),
+            "collections_per_customer": float(collection_per_customer),
+        })
+
+    return Response(data)
+
+
+
+@api_view(["GET"])
+def commercial_all_business_districts_view(request):
+    state_name = request.query_params.get("state")
+    year = int(request.query_params.get("year", date.today().year))
+    month = int(request.query_params.get("month", date.today().month))
+
+    # Determine the selected month range
+    period_start = date(year, month, 1)
+    period_end = period_start + relativedelta(months=1)
+
+    districts = BusinessDistrict.objects.filter(state__name__iexact=state_name)
+    result = []
+
+    for district in districts:
+        # Energy Delivered (MWh to GWh)
+        energy_delivered = EnergyDelivered.objects.filter(
+            feeder__business_district=district,
+            date__gte=period_start,
+            date__lt=period_end,
+        ).aggregate(Sum("energy_mwh"))['energy_mwh__sum'] or 0
+
+        energy_delivered /= 1000
+
+        # Commercial Summary
+        feeders = district.feeders.all()
+        reps = SalesRepresentative.objects.filter(assigned_feeders__in=feeders).distinct()
+        summaries = MonthlyCommercialSummary.objects.filter(
+            sales_rep__in=reps,
+            month__year=period_start.year,
+            month__month=period_start.month,
+        )
+
+        revenue_billed = summaries.aggregate(Sum("revenue_billed"))['revenue_billed__sum'] or 0
+        revenue_collected = summaries.aggregate(Sum("revenue_collected"))['revenue_collected__sum'] or 0
+
+        billing_efficiency = ((revenue_billed/1000) / energy_delivered) if energy_delivered else 0
+        collection_efficiency = (revenue_collected / revenue_billed * 100) if revenue_billed else 0
+        atcc = billing_efficiency * collection_efficiency / 100 if energy_delivered and revenue_billed else 0
+
+        result.append({
+            "name": district.name,
+            "energy_delivered": round(energy_delivered, 2),
+            "revenue_billed": round(revenue_billed , 2),   
+            
+            "revenue_collected": round(revenue_collected , 2),
+            "billing_efficiency": round(billing_efficiency, 2),
+            "collection_efficiency": round(collection_efficiency, 2),
+            "atcc": round(atcc, 2),
+        })
+
+    return Response(result)
