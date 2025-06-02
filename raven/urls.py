@@ -36,6 +36,8 @@ from commercial.views import (
     commercial_all_states_view,
     commercial_state_metrics_view,
     commercial_all_business_districts_view,
+    top_least_feeders_atcc,
+    feeder_metrics,
 )
 
 from technical.views import (
@@ -135,6 +137,8 @@ urlpatterns = [
     path('api/metrics/commercial/all-states/',commercial_all_states_view, name='commercial-all-states-view'),
     path('api/metrics/commercial/state/',commercial_state_metrics_view, name='commercial-state-view'),
     path('api/metrics/commercial/business-districts/',commercial_all_business_districts_view, name='commercial-business-districts-view'),
+    path('api/metrics/commercial/feeders/top-least/', top_least_feeders_atcc, name='top-least-feeders-atcc'),
+    path('api/metrics/commercial/feeders/metrics/', feeder_metrics, name='feeder-metrics'),
 
 
 ]

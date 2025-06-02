@@ -1,34 +1,28 @@
 from common.models import Feeder
 from commercial.models import Customer
+from common.models import BusinessDistrict, State
 
 def get_filtered_feeders(request):
     filters = {}
-    state_slug = request.GET.get('state')
-    district_slug = request.GET.get('district')
-    substation_slug = request.GET.get('substation')
-    transformer_slug = request.GET.get('transformer')
-    feeder_slug = request.GET.get('feeder')
-    band_slug = request.GET.get('band')
 
-    if feeder_slug:
-        filters['slug'] = feeder_slug
-    elif transformer_slug:
-        filters['transformers__slug'] = transformer_slug
-    elif substation_slug:
-        filters['substation__slug'] = substation_slug
-    elif district_slug:
-        filters['substation__district__slug'] = district_slug
-    elif state_slug:
-        filters['substation__district__state__slug'] = state_slug
+    if 'business_district' in request.GET:
+        district_name = request.GET.get('business_district')
+        try:
+            district = BusinessDistrict.objects.get(name__iexact=district_name)
+            filters['business_district'] = district
+        except BusinessDistrict.DoesNotExist:
+            return Feeder.objects.none()
 
-    feeders = Feeder.objects.filter(**filters).distinct()
+    elif 'state' in request.GET:
+        state_name = request.GET.get('state')
+        try:
+            state = State.objects.get(name__iexact=state_name)
+            filters['business_district__state'] = state
+        except State.DoesNotExist:
+            return Feeder.objects.none()
 
-    if band_slug:
-        feeders = feeders.filter(
-            transformers__customer__band__slug=band_slug
-        ).distinct()
+    return Feeder.objects.filter(**filters).distinct()
 
-    return feeders
 
 
 def get_filtered_customers(request):

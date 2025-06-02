@@ -19,6 +19,8 @@ from commercial.models import DailyCollection
 from django.utils.dateparse import parse_date
 from datetime import date
 from dateutil.relativedelta import relativedelta
+from django.db.models import Sum, FloatField, F, ExpressionWrapper, Case, When, Value
+
 from decimal import Decimal, ROUND_HALF_UP
 
 def round_two_places(value):
@@ -520,3 +522,72 @@ def commercial_all_business_districts_view(request):
         })
 
     return Response(result)
+
+
+# Helper
+def NullIfZero(field):
+    return Case(
+        When(**{f'{field.name}': 0}, then=Value(None)),
+        default=field,
+        output_field=FloatField(),
+    )
+
+@api_view(['GET'])
+def top_least_feeders_atcc(request):
+    feeders = get_filtered_feeders(request)
+    if feeders is None:
+        return Response([], status=200)
+
+    annotated = feeders.annotate(
+        energy_delivered=Sum('dailyenergydelivered__energy_mwh'),
+        energy_billed=Sum('monthlyenergybilled__energy_mwh'),
+        revenue_collected=Sum('dailyrevenuecollected__amount'),
+        revenue_billed=Sum('commercial_monthly_revenue_billed__amount'),
+    ).annotate(
+        billing_efficiency=ExpressionWrapper(
+            100 * F('energy_billed') / NullIfZero(F('energy_delivered')),
+            output_field=FloatField()
+        ),
+        collection_efficiency=ExpressionWrapper(
+            100 * F('revenue_collected') / NullIfZero(F('revenue_billed')),
+            output_field=FloatField()
+        ),
+    ).annotate(
+        atcc=ExpressionWrapper(
+            100 - ((F('billing_efficiency') * F('collection_efficiency')) / 100),
+            output_field=FloatField()
+        )
+    )
+
+    # Example response structure (adjust as needed)
+    result = [
+        {
+            "name": f.name,
+            "atcc": f.atcc,
+            "billing_efficiency": f.billing_efficiency,
+            "collection_efficiency": f.collection_efficiency,
+        }
+        for f in annotated
+    ]
+    return Response(result, status=200)
+
+
+@api_view(['GET'])
+def feeder_metrics(request):
+    feeders = get_filtered_feeders(request)
+    date_filter = get_date_range_from_request(request)
+
+    queryset = feeders.filter(**date_filter).annotate(
+        energy_delivered=Sum('dailyenergydelivered__energy_mwh'),
+        energy_billed=Sum('monthlyenergybilled__energy_mwh'),
+        energy_collected=Sum('dailyrevenuecollected__amount'),
+        atcc=ExpressionWrapper(
+            100 - (
+                (100 - F('billing_efficiency')) *
+                (100 - F('collection_efficiency')) / 100
+            ),
+            output_field=FloatField()
+        )
+    ).values('name', 'energy_delivered', 'energy_billed', 'energy_collected', 'atcc')
+
+    return Response(queryset)
