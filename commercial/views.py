@@ -598,16 +598,20 @@ DEFAULT_TARIFF_PER_MWH = Decimal("50000")
 
 class OverviewAPIView(APIView):
     def get(self, request):
-        # Handle query parameters
+        # Accept either: ?month=5&year=2024 or ?from=YYYY-MM-DD&to=YYYY-MM-DD
+        try:
+            month = int(request.GET.get("month"))
+            year = int(request.GET.get("year"))
+            target = datetime(year, month, 1)
+        except (TypeError, ValueError):
+            target = None
+
         from_date_str = request.GET.get("from")
         to_date_str = request.GET.get("to")
-        month_str = request.GET.get("month")
+        from_date = datetime.strptime(from_date_str, "%Y-%m-%d") if from_date_str else None
+        to_date = datetime.strptime(to_date_str, "%Y-%m-%d") if to_date_str else None
 
-        from_date = parse_date(from_date_str) if from_date_str else None
-        to_date = parse_date(to_date_str) if to_date_str else None
-        month = parse_date(month_str) if month_str else None
-
-        # Determine the range of months to include
+        # Determine range of months
         if from_date and to_date:
             current = from_date.replace(day=1)
             months = []
@@ -615,8 +619,8 @@ class OverviewAPIView(APIView):
                 months.append(current)
                 current += relativedelta(months=1)
         else:
-            # Default to 5 months ending in `month` or today
-            target = month or datetime.today().replace(day=1)
+            # Use month/year from query or fallback to latest 5 months
+            target = target or datetime.today().replace(day=1)
             months = [(target - relativedelta(months=i)).replace(day=1) for i in range(5)][::-1]
 
         overview_data = []
@@ -656,7 +660,6 @@ class OverviewAPIView(APIView):
                 "total_cost": total_cost
             })
 
-        # Compute % deltas for latest month
         current = overview_data[-1]
         previous = overview_data[-2] if len(overview_data) > 1 else {}
 
