@@ -591,3 +591,68 @@ def feeder_metrics(request):
     ).values('name', 'energy_delivered', 'energy_billed', 'energy_collected', 'atcc')
 
     return Response(queryset)
+
+
+
+class OverviewAPIView(APIView):
+    def get(self, request):
+        # Get target month from query param or default to current month
+        try:
+            month = parse_date(request.GET.get("month")) or datetime.today().replace(day=1)
+        except:
+            month = datetime.today().replace(day=1)
+
+        # Previous months for chart (e.g., last 4)
+        months = [(month - relativedelta(months=i)).replace(day=1) for i in range(5)][::-1]
+
+        overview_data = []
+
+        for idx, m in enumerate(months):
+            comm = MonthlyCommercialSummary.objects.filter(month=m)
+            tech = EnergyDelivered.objects.filter(date__month=m.month, date__year=m.year)
+            billed_energy = MonthlyEnergyBilled.objects.filter(month=m)
+            cost = MonthlyCost.objects.filter(month=m)  # Replace with actual cost model if different
+
+            revenue_billed = comm.aggregate(total=Sum("revenue_billed"))["total"] or 0
+            revenue_collected = comm.aggregate(total=Sum("revenue_collected"))["total"] or 0
+            customers_billed = comm.aggregate(total=Sum("customers_billed"))["total"] or 0
+            customers_responded = comm.aggregate(total=Sum("customers_responded"))["total"] or 0
+
+            delivered_energy = tech.aggregate(total=Sum("energy_mwh"))["total"] or 0
+            energy_billed = billed_energy.aggregate(total=Sum("energy_mwh"))["total"] or 0
+            total_cost = cost.aggregate(total=Sum("amount"))["total"] or 0
+
+            billing_eff = (energy_billed / delivered_energy) if delivered_energy else 0
+            collection_eff = (revenue_collected / revenue_billed) if revenue_billed else 0
+            atcc = 1 - (billing_eff * collection_eff)
+
+            overview_data.append({
+                "month": m.strftime("%Y-%m"),
+                "billing_efficiency": round(billing_eff * 100, 2),
+                "collection_efficiency": round(collection_eff * 100, 2),
+                "atcc": round(atcc * 100, 2),
+                "revenue_billed": revenue_billed,
+                "revenue_collected": revenue_collected,
+                "energy_billed": energy_billed,
+                "energy_delivered": delivered_energy,
+                "customer_response_rate": round((customers_responded / customers_billed) * 100, 2) if customers_billed else 0,
+                "total_cost": total_cost
+            })
+
+        # Compute % delta between last and second-to-last month
+        current = overview_data[-1]
+        previous = overview_data[-2] if len(overview_data) > 1 else {}
+
+        def delta(metric):
+            if metric in current and metric in previous and previous[metric]:
+                return round(((current[metric] - previous[metric]) / previous[metric]) * 100, 2)
+            return None
+
+        current["delta_atcc"] = delta("atcc")
+        current["delta_billing_efficiency"] = delta("billing_efficiency")
+        current["delta_collection_efficiency"] = delta("collection_efficiency")
+
+        return Response({
+            "current": current,
+            "history": overview_data[:-1]
+        })
