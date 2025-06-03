@@ -598,7 +598,6 @@ DEFAULT_TARIFF_PER_MWH = Decimal("50000")
 
 class OverviewAPIView(APIView):
     def get(self, request):
-        # Accept either: ?month=5&year=2024 or ?from=YYYY-MM-DD&to=YYYY-MM-DD
         try:
             month = int(request.GET.get("month"))
             year = int(request.GET.get("year"))
@@ -611,7 +610,6 @@ class OverviewAPIView(APIView):
         from_date = datetime.strptime(from_date_str, "%Y-%m-%d") if from_date_str else None
         to_date = datetime.strptime(to_date_str, "%Y-%m-%d") if to_date_str else None
 
-        # Determine range of months
         if from_date and to_date:
             current = from_date.replace(day=1)
             months = []
@@ -619,7 +617,6 @@ class OverviewAPIView(APIView):
                 months.append(current)
                 current += relativedelta(months=1)
         else:
-            # Use month/year from query or fallback to latest 5 months
             target = target or datetime.today().replace(day=1)
             months = [(target - relativedelta(months=i)).replace(day=1) for i in range(5)][::-1]
 
@@ -643,7 +640,6 @@ class OverviewAPIView(APIView):
             billing_eff = (energy_billed / delivered_energy) if delivered_energy else 0
             collection_eff = (revenue_collected / revenue_billed) if revenue_billed else 0
             atcc = 1 - (billing_eff * collection_eff)
-
             energy_collected = revenue_collected / DEFAULT_TARIFF_PER_MWH if revenue_collected else 0
 
             overview_data.append({
@@ -668,9 +664,19 @@ class OverviewAPIView(APIView):
                 return round(((current[metric] - previous[metric]) / previous[metric]) * 100, 2)
             return None
 
-        current["delta_atcc"] = delta("atcc")
-        current["delta_billing_efficiency"] = delta("billing_efficiency")
-        current["delta_collection_efficiency"] = delta("collection_efficiency")
+        for metric in [
+            "atcc",
+            "billing_efficiency",
+            "collection_efficiency",
+            "revenue_billed",
+            "revenue_collected",
+            "energy_billed",
+            "energy_delivered",
+            "total_cost",
+            "energy_collected",
+            "customer_response_rate"
+        ]:
+            current[f"delta_{metric}"] = delta(metric)
 
         return Response({
             "current": current,
