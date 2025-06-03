@@ -54,3 +54,23 @@ class DailyCollectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DailyCollection
         fields = '__all__'
+
+
+class OverviewMetricSerializer(serializers.Serializer):
+    month = serializers.CharField()
+
+    billing_efficiency = serializers.FloatField()
+    collection_efficiency = serializers.FloatField()
+    atcc = serializers.FloatField()
+
+    revenue_billed = serializers.FloatField()
+    revenue_collected = serializers.FloatField()
+    energy_billed = serializers.FloatField()
+    energy_delivered = serializers.FloatField()
+
+    customer_response_rate = serializers.FloatField()
+    total_cost = serializers.FloatField()
+    
+    delta_atcc = serializers.FloatField(required=False)
+    delta_billing_efficiency = serializers.FloatField(required=False)
+    delta_collection_efficiency = serializers.FloatField(required=False)

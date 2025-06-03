@@ -30,6 +30,7 @@ from commercial.views import (
     SalesRepPerformanceViewSet,
     SalesRepMetricsView,
     DailyCollectionViewSet,
+    OverviewAPIView,
 
     CommercialMetricsSummaryView,
     CommercialOverviewAPIView,
@@ -123,6 +124,7 @@ router.register(r'hr/staff', StaffViewSet, basename='hr-staff')
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/overview/', OverviewAPIView.as_view(), name='overview'),
     path('api/metrics/feeder/', FeederMetricsView.as_view(), name='feeder-metrics'),
     path('api/metrics/commercial-summary/', CommercialMetricsSummaryView.as_view(), name='commercial-summary'),
     path('api/metrics/technical-summary/', TechnicalMetricsView.as_view(), name='technical-summary'),

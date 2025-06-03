@@ -14,7 +14,7 @@ from commercial.metrics import calculate_derived_metrics, get_sales_rep_performa
 from rest_framework.decorators import api_view
 from decimal import Decimal, InvalidOperation
 from technical.models import EnergyDelivered
-from financial.models import MonthlyRevenueBilled
+from financial.models import MonthlyRevenueBilled, Expense
 from commercial.models import DailyCollection
 from django.utils.dateparse import parse_date
 from datetime import date
@@ -594,24 +594,38 @@ def feeder_metrics(request):
 
 
 
+DEFAULT_TARIFF_PER_MWH = Decimal("50000")
+
 class OverviewAPIView(APIView):
     def get(self, request):
-        # Get target month from query param or default to current month
-        try:
-            month = parse_date(request.GET.get("month")) or datetime.today().replace(day=1)
-        except:
-            month = datetime.today().replace(day=1)
+        # Handle query parameters
+        from_date_str = request.GET.get("from")
+        to_date_str = request.GET.get("to")
+        month_str = request.GET.get("month")
 
-        # Previous months for chart (e.g., last 4)
-        months = [(month - relativedelta(months=i)).replace(day=1) for i in range(5)][::-1]
+        from_date = parse_date(from_date_str) if from_date_str else None
+        to_date = parse_date(to_date_str) if to_date_str else None
+        month = parse_date(month_str) if month_str else None
+
+        # Determine the range of months to include
+        if from_date and to_date:
+            current = from_date.replace(day=1)
+            months = []
+            while current <= to_date:
+                months.append(current)
+                current += relativedelta(months=1)
+        else:
+            # Default to 5 months ending in `month` or today
+            target = month or datetime.today().replace(day=1)
+            months = [(target - relativedelta(months=i)).replace(day=1) for i in range(5)][::-1]
 
         overview_data = []
 
-        for idx, m in enumerate(months):
+        for m in months:
             comm = MonthlyCommercialSummary.objects.filter(month=m)
-            tech = EnergyDelivered.objects.filter(date__month=m.month, date__year=m.year)
+            tech = EnergyDelivered.objects.filter(date__year=m.year, date__month=m.month)
             billed_energy = MonthlyEnergyBilled.objects.filter(month=m)
-            cost = MonthlyCost.objects.filter(month=m)  # Replace with actual cost model if different
+            cost = Expense.objects.filter(date__year=m.year, date__month=m.month)
 
             revenue_billed = comm.aggregate(total=Sum("revenue_billed"))["total"] or 0
             revenue_collected = comm.aggregate(total=Sum("revenue_collected"))["total"] or 0
@@ -620,14 +634,16 @@ class OverviewAPIView(APIView):
 
             delivered_energy = tech.aggregate(total=Sum("energy_mwh"))["total"] or 0
             energy_billed = billed_energy.aggregate(total=Sum("energy_mwh"))["total"] or 0
-            total_cost = cost.aggregate(total=Sum("amount"))["total"] or 0
+            total_cost = cost.aggregate(total=Sum("credit"))["total"] or 0
 
             billing_eff = (energy_billed / delivered_energy) if delivered_energy else 0
             collection_eff = (revenue_collected / revenue_billed) if revenue_billed else 0
             atcc = 1 - (billing_eff * collection_eff)
 
+            energy_collected = revenue_collected / DEFAULT_TARIFF_PER_MWH if revenue_collected else 0
+
             overview_data.append({
-                "month": m.strftime("%Y-%m"),
+                "month": m.strftime("%b"),
                 "billing_efficiency": round(billing_eff * 100, 2),
                 "collection_efficiency": round(collection_eff * 100, 2),
                 "atcc": round(atcc * 100, 2),
@@ -635,11 +651,12 @@ class OverviewAPIView(APIView):
                 "revenue_collected": revenue_collected,
                 "energy_billed": energy_billed,
                 "energy_delivered": delivered_energy,
+                "energy_collected": round(energy_collected, 2),
                 "customer_response_rate": round((customers_responded / customers_billed) * 100, 2) if customers_billed else 0,
                 "total_cost": total_cost
             })
 
-        # Compute % delta between last and second-to-last month
+        # Compute % deltas for latest month
         current = overview_data[-1]
         previous = overview_data[-2] if len(overview_data) > 1 else {}
 
