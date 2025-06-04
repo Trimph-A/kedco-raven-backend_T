@@ -15,6 +15,21 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from common.mixins import DistrictLocationFilterMixin
 
+from django.db.models import Sum
+from django.utils.timezone import now
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from datetime import date
+from dateutil.relativedelta import relativedelta
+from commercial.models import MonthlyCommercialSummary, DailyRevenueCollected, DailyEnergyDelivered
+from django.db.models import Q
+from .metrics import get_financial_feeder_data
+from commercial.models import SalesRepresentative
+from django.db.models import Count
+from datetime import datetime, timedelta
+from rest_framework import status
+from commercial.serializers import SalesRepresentativeSerializer
+
 
 
 class ExpenseCategoryViewSet(viewsets.ModelViewSet):
@@ -68,3 +83,262 @@ class FinancialSummaryView(APIView):
         return Response(data)
     
 
+@api_view(["GET"])
+def financial_overview_view(request):
+    year = int(request.query_params.get("year", date.today().year))
+    month = request.query_params.get("month")
+    state_name = request.query_params.get("state")
+    district_name = request.query_params.get("business_district")
+
+    # Filters
+    commercial_filter = Q(month__year=year)
+    expense_filter = Q(date__year=year)
+
+    if district_name:
+        commercial_filter &= Q(sales_rep__assigned_feeders__business_district__name__iexact=district_name)
+        expense_filter &= Q(district__name__iexact=district_name)
+    elif state_name:
+        commercial_filter &= Q(sales_rep__assigned_feeders__business_district__state__name__iexact=state_name)
+        expense_filter &= Q(district__state__name__iexact=state_name)
+
+    # --- Monthly Commercial Collections (Always full year) ---
+    monthly_collections = MonthlyCommercialSummary.objects.filter(commercial_filter).values_list("month__month").annotate(
+        total_collections=Sum("revenue_collected"),
+        total_billed=Sum("revenue_billed")
+    )
+
+    monthly_data = {m: {"collections": 0, "billed": 0} for m in range(1, 13)}
+    for m, collected, billed in monthly_collections:
+        monthly_data[m]["collections"] = float(collected or 0)
+        monthly_data[m]["billed"] = float(billed or 0)
+
+    monthly_summaries = [
+        {
+            "month": date(year, m, 1).strftime("%b"),
+            "collections": monthly_data[m]["collections"],
+            "billed": monthly_data[m]["billed"],
+        }
+        for m in range(1, 13)
+    ]
+
+    # --- Revenue/Collection and Expenses (Filtered by month if provided) ---
+    if month:
+        try:
+            month = int(month)
+            start_month = date(year, month, 1)
+            end_month = start_month + relativedelta(months=1)
+
+            monthly_filter = Q(month__gte=start_month, month__lt=end_month)
+            expense_month_filter = Q(date__gte=start_month, date__lt=end_month)
+
+            current_month_filter = commercial_filter & monthly_filter
+            expense_filter &= expense_month_filter
+        except ValueError:
+            return Response({"error": "Invalid month format"}, status=400)
+    else:
+        current_month_filter = commercial_filter  # use whole year
+
+    # Revenue/Collection for the month/year
+    monthly_summary = MonthlyCommercialSummary.objects.filter(current_month_filter).aggregate(
+        revenue_billed=Sum("revenue_billed"),
+        revenue_collected=Sum("revenue_collected")
+    )
+
+    revenue_billed = float(monthly_summary["revenue_billed"] or 0)
+    revenue_collected = float(monthly_summary["revenue_collected"] or 0)
+
+    # Expenses for selected scope
+    expenses = Expense.objects.filter(expense_filter)
+    total_cost = float(expenses.aggregate(total=Sum("credit"))["total"] or 0)
+
+    opex_breakdown = (
+        expenses.values("opex_category__name")
+        .annotate(total=Sum("credit"))
+        .order_by("opex_category__name")
+    )
+
+    breakdown = [
+        {
+            "category": entry["opex_category__name"] or "Uncategorized",
+            "amount": float(entry["total"] or 0)
+        }
+        for entry in opex_breakdown
+    ]
+
+
+    # --- Historical Financial Breakdown (last 5 months including selected) ---
+    selected_month = int(request.query_params.get("month", date.today().month))
+    selected_date = date(year, selected_month, 1)
+    prev_months = [selected_date - relativedelta(months=i) for i in range(4, -1, -1)]
+
+    historical_data = []
+
+    for dt in prev_months:
+        month_start = date(dt.year, dt.month, 1)
+        month_end = month_start + relativedelta(months=1)
+
+        # MonthlyCommercialSummary filters by month field
+        summary_filter = commercial_filter & Q(month__gte=month_start, month__lt=month_end)
+
+        # Expense filters by date field
+        cost_filter = expense_filter & Q(date__gte=month_start, date__lt=month_end)
+
+        summary = MonthlyCommercialSummary.objects.filter(summary_filter).aggregate(
+            revenue_collected=Sum("revenue_collected"),
+            revenue_billed=Sum("revenue_billed")
+        )
+        cost = Expense.objects.filter(cost_filter).aggregate(total=Sum("credit"))["total"] or 0
+
+        historical_data.append({
+            "month": dt.strftime("%b"),
+            "total_cost": float(cost),
+            "revenue_billed": float(summary["revenue_billed"] or 0),
+            "revenue_collected": float(summary["revenue_collected"] or 0),
+        })
+
+    # Add deltas (percentage change from previous month)
+    for i in range(1, len(historical_data)):
+        for key in ["total_cost", "revenue_billed", "revenue_collected"]:
+            prev = historical_data[i - 1][key]
+            curr = historical_data[i][key]
+            delta = ((curr - prev) / prev * 100) if prev else 0
+            historical_data[i][f"{key}_delta"] = round(delta, 2)
+
+
+
+    return Response({
+        "monthly_summary": monthly_summaries,
+        "revenue_billed": revenue_billed,
+        "revenue_collected": revenue_collected,
+        "total_cost": total_cost,
+        "opex_breakdown": breakdown,
+        "historical_summary": historical_data,
+    })
+
+@api_view(['GET'])
+def financial_feeder_view(request):
+    """
+    Returns feeder-level financial metrics filtered by state or business district and date.
+    Business district filter takes precedence.
+    """
+    data = get_financial_feeder_data(request)
+    return Response(data)
+
+
+@api_view(["GET"])
+def sales_rep_performance_view(request, rep_id):
+    try:
+        rep = SalesRepresentative.objects.get(id=rep_id)
+    except SalesRepresentative.DoesNotExist:
+        return Response({"error": "Sales rep not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    mode = request.GET.get("mode", "monthly")
+    year = int(request.GET.get("year", datetime.now().year))
+    month = int(request.GET.get("month", datetime.now().month))
+
+    start_date = datetime(year, month, 1)
+    end_date = (start_date + relativedelta(months=1)) - timedelta(days=1)
+
+    # Current month summary
+    current_summary = MonthlyCommercialSummary.objects.filter(
+        sales_rep=rep,
+        month__range=(start_date, end_date)
+    ).aggregate(
+        revenue_billed=Sum("revenue_billed"),
+        revenue_collected=Sum("revenue_collected"),
+    )
+
+    revenue_billed = current_summary["revenue_billed"] or 0
+    revenue_collected = current_summary["revenue_collected"] or 0
+    outstanding_billed = revenue_billed - revenue_collected
+
+    # All-time
+    all_time_summary = MonthlyCommercialSummary.objects.filter(sales_rep=rep).aggregate(
+        all_time_billed=Sum("revenue_billed"),
+        all_time_collected=Sum("revenue_collected")
+    )
+    outstanding_all_time = (all_time_summary["all_time_billed"] or 0) - (all_time_summary["all_time_collected"] or 0)
+
+    # ---- Previous 4 Months ---- #
+    monthly_summaries = []
+    for i in range(4):
+        ref_date = start_date - relativedelta(months=i)
+        month_start = ref_date.replace(day=1)
+        month_end = (month_start + relativedelta(months=1)) - timedelta(days=1)
+
+        summary = MonthlyCommercialSummary.objects.filter(
+            sales_rep=rep,
+            month__range=(month_start, month_end)
+        ).aggregate(
+            revenue_billed=Sum("revenue_billed") or 0,
+            revenue_collected=Sum("revenue_collected") or 0,
+        )
+
+        billed = summary["revenue_billed"] or 0
+        collected = summary["revenue_collected"] or 0
+        outstanding = billed - collected
+
+        monthly_summaries.append({
+            "month": month_start.strftime("%b"),
+            "revenue_billed": billed,
+            "revenue_collected": collected,
+            "outstanding_billed": outstanding
+        })
+
+    monthly_summaries.reverse()
+
+    return Response({
+        "sales_rep": {
+            "id": str(rep.id),
+            "name": rep.name
+        },
+        "current": {
+            "revenue_billed": revenue_billed,
+            "revenue_collected": revenue_collected,
+            "outstanding_billed": outstanding_billed
+        },
+        "outstanding_all_time": outstanding_all_time,
+        "previous_months": monthly_summaries
+    })
+
+@api_view(["GET"])
+def list_sales_reps(request):
+    reps = SalesRepresentative.objects.all()[:10]
+    data = SalesRepresentativeSerializer(reps, many=True).data
+    return Response(data)
+
+
+@api_view(["GET"])
+def sales_rep_global_summary_view(request):
+    mode = request.GET.get("mode", "monthly")
+
+    if mode == "monthly":
+        try:
+            year = int(request.GET.get("year", datetime.now().year))
+            month = int(request.GET.get("month", datetime.now().month))
+            start_date = datetime(year, month, 1)
+            end_date = (start_date + relativedelta(months=1)) - relativedelta(days=1)
+        except (TypeError, ValueError):
+            return Response({"error": "Invalid year or month for monthly mode"}, status=400)
+    else:
+        from common.filters import get_date_range_from_request
+        start_date, end_date = get_date_range_from_request(request, "month")
+
+    summary = MonthlyCommercialSummary.objects.filter(
+        month__range=(start_date, end_date)
+    ).aggregate(
+        total_billed=Sum("revenue_billed"),
+        total_collected=Sum("revenue_collected"),
+        active_accounts=Count("id")
+    )
+
+    total_billed = summary["total_billed"] or 0
+    total_collected = summary["total_collected"] or 0
+    active_accounts = summary["active_accounts"] or 0
+
+    return Response({
+        "daily_run_rate": total_billed / 30,
+        "collections_on_outstanding": total_collected,
+        "active_accounts": active_accounts,
+        "suspended_accounts": 0
+    })

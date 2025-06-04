@@ -56,6 +56,11 @@ from financial.views import (
     ExpenseViewSet,
     MonthlyRevenueBilledViewSet,
     FinancialSummaryView,
+    financial_overview_view,
+    financial_feeder_view,
+    sales_rep_performance_view,
+    list_sales_reps,
+    sales_rep_global_summary_view
 )
 from financial.views import GLBreakdownViewSet
 
@@ -144,6 +149,12 @@ urlpatterns = [
 
     path("api/metrics/feeders/performance/", feeder_performance_view, name="feeder-performance"),
     path("api/metrics/feeders/list/", feeders_by_location_view, name="feeders-by-location"),
+
+    path('api/financial/overview/', financial_overview_view, name='financial-overview'),
+    path("api/financial/feeder/", financial_feeder_view),
+    path("api/financial/sales-reps/<uuid:rep_id>/performance/", sales_rep_performance_view),
+    path("api/financial/sales-reps/", list_sales_reps),
+    path("api/financial/sales-reps/summary/", sales_rep_global_summary_view),
 
 
 ]

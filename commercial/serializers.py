@@ -70,7 +70,8 @@ class OverviewMetricSerializer(serializers.Serializer):
 
     customer_response_rate = serializers.FloatField()
     total_cost = serializers.FloatField()
-    
+
     delta_atcc = serializers.FloatField(required=False)
     delta_billing_efficiency = serializers.FloatField(required=False)
     delta_collection_efficiency = serializers.FloatField(required=False)
+    

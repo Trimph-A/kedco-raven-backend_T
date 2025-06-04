@@ -2,6 +2,7 @@ from django.db.models import Sum
 from commercial.utils import get_filtered_feeders
 from commercial.date_filters import get_date_range_from_request
 from financial.models import *
+from commercial.models import MonthlyCommercialSummary
 
 def get_total_cost(request):
     feeders = get_filtered_feeders(request)
@@ -91,3 +92,67 @@ def get_financial_summary(request):
         "hq_disbursement": total_disbursed,
         "opex_breakdown": list(opex_breakdown)
     }
+
+
+from django.db.models import Sum
+from commercial.models import MonthlyRevenueBilled, DailyRevenueCollected
+from common.models import Feeder
+from datetime import date
+from calendar import monthrange
+
+def get_financial_feeder_data(request):
+    state = request.GET.get("state")
+    bd = request.GET.get("business_district")
+    mode = request.GET.get("mode", "monthly")  # Default to 'monthly'
+    year = request.GET.get("year")
+    month = request.GET.get("month")
+
+    # Handle date filtering
+    if mode == "monthly" and year and month:
+        year = int(year)
+        month = int(month)
+        start_day = date(year, month, 1)
+        end_day = date(year, month, monthrange(year, month)[1])
+        date_from, date_to = start_day, end_day
+    else:
+        date_from, date_to = get_date_range_from_request(request, "date")
+
+    # Apply filtering hierarchy: Business District > State
+    feeders = Feeder.objects.all()
+    if bd:
+        feeders = feeders.filter(business_district__name=bd)
+    elif state:
+        feeders = feeders.filter(business_district__state__name=state)
+
+    data = []
+
+    for feeder in feeders:
+        # Get sales reps linked to this feeder
+        sales_reps = feeder.salesrepresentative_set.all()
+
+        # Aggregate commercial summary
+        summary = MonthlyCommercialSummary.objects.filter(
+            sales_rep__in=sales_reps,
+            month__range=(date_from, date_to)
+        ).aggregate(
+            revenue_billed=Sum("revenue_billed"),
+            revenue_collected=Sum("revenue_collected")
+        )
+
+        revenue_billed = summary["revenue_billed"] or 0
+        revenue_collected = summary["revenue_collected"] or 0
+
+        # Aggregate cost from expenses in feeder's business district
+        total_cost = Expense.objects.filter(
+            district=feeder.business_district,
+            date__range=(date_from, date_to)
+        ).aggregate(total=Sum("credit"))["total"] or 0
+
+        data.append({
+            "feeder": feeder.name,
+            "total_cost": round(total_cost, 2),
+            "revenue_billed": round(revenue_billed, 2),
+            "revenue_collected": round(revenue_collected, 2),
+        })
+
+    return data
