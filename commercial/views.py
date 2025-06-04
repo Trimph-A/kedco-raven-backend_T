@@ -447,6 +447,20 @@ def commercial_all_states_view(request):
 
 
 
+# def round_two_places(value):
+#     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def compute_delta(current, previous):
+    if previous in [0, None]:
+        return None
+    try:
+        delta = ((Decimal(current) - Decimal(previous)) / Decimal(previous)) * 100
+        return float(round_two_places(delta))
+    except Exception:
+        return None
+
+
 @api_view(["GET"])
 def commercial_state_metrics_view(request):
     state_name = request.query_params.get("state")
@@ -463,12 +477,11 @@ def commercial_state_metrics_view(request):
     def generate_month_list(reference_date):
         return [reference_date - relativedelta(months=i) for i in range(4, -1, -1)]
 
-    selected_date = (
-        date(year, month, 1) if mode == "monthly" else parse_date(to_date) or date.today()
-    )
+    selected_date = date(year, month, 1) if mode == "monthly" else parse_date(to_date) or date.today()
     months = generate_month_list(selected_date)
 
     data = []
+    previous = None
 
     for m in months:
         reps = SalesRepresentative.objects.filter(
@@ -485,61 +498,57 @@ def commercial_state_metrics_view(request):
             feeder__business_district__state=state,
             date__year=m.year,
             date__month=m.month,
-        ).aggregate(Sum("energy_mwh"))["energy_mwh__sum"] or Decimal(0)
+        ).aggregate(Sum("energy_mwh"))['energy_mwh__sum'] or Decimal(0)
 
-        summary_totals = summaries.aggregate(
+        totals = summaries.aggregate(
             revenue_collected=Sum("revenue_collected"),
             revenue_billed=Sum("revenue_billed"),
             customers_billed=Sum("customers_billed"),
             customers_responded=Sum("customers_responded"),
         )
 
-        revenue_collected = summary_totals["revenue_collected"] or Decimal(0)
-        revenue_billed = summary_totals["revenue_billed"] or Decimal(0)
-        customers_billed = summary_totals["customers_billed"] or 1  # Avoid divide by zero
-        customers_responded = summary_totals["customers_responded"] or 0
+        revenue_billed = totals['revenue_billed'] or Decimal(0)
+        revenue_collected = totals['revenue_collected'] or Decimal(0)
+        cust_billed = totals['customers_billed'] or 1
+        cust_resp = totals['customers_responded'] or 0
 
-        # Metrics
-        collection_eff = (
-            (revenue_collected / revenue_billed) * 100
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if revenue_billed else Decimal(0)
+        # Metrics calculations
+        billing_eff = ((revenue_billed / 50) / delivered * 100) if delivered else Decimal(0)
+        collection_eff = ((revenue_collected / revenue_billed) * 100) if revenue_billed else Decimal(0)
+        atcc = (billing_eff * collection_eff / 100) if billing_eff and collection_eff else Decimal(0)
+        energy_collected = (delivered * collection_eff / 100) if delivered else Decimal(0)
+        response_rate = (Decimal(cust_resp) / Decimal(cust_billed) * 100) if cust_billed else Decimal(0)
+        revenue_per_cust = (revenue_billed / Decimal(cust_billed))
+        collection_per_cust = (revenue_collected / Decimal(cust_billed))
 
-        billing_eff = (
-            ((revenue_billed/50) / delivered) * 100
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if delivered else Decimal(0)
-
-        atcc = (
-            (billing_eff * collection_eff / 100)
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        energy_collected = (
-            (delivered * collection_eff / 100)
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        response_rate = (
-            (Decimal(customers_responded) / Decimal(customers_billed)) * 100
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if customers_billed else Decimal(0)
-
-        revenue_per_customer = (
-            revenue_billed / Decimal(customers_billed)
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        collection_per_customer = (
-            revenue_collected / Decimal(customers_billed)
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        data.append({
+        current = {
             "month": m.strftime("%b"),
-            "energy_delivered": float(delivered),
-            "revenue_billed": float(revenue_billed),  # Still money
-            "energy_collected": float(energy_collected),  # Energy estimated from delivery × CE
-            "billing_efficiency": float(billing_eff),
-            "collection_efficiency": float(collection_eff),
-            "atcc": float(atcc),
-            "customer_response_rate": float(response_rate),
-            "revenue_billed_per_customer": float(revenue_per_customer),
-            "collections_per_customer": float(collection_per_customer),
-        })
+            "energy_delivered": float(round_two_places(delivered)),
+            "revenue_billed": float(round_two_places(revenue_billed)),
+            "energy_collected": float(round_two_places(energy_collected)),
+            "billing_efficiency": float(round_two_places(billing_eff)),
+            "collection_efficiency": float(round_two_places(collection_eff)),
+            "atcc": float(round_two_places(atcc)),
+            "customer_response_rate": float(round_two_places(response_rate)),
+            "revenue_billed_per_customer": float(round_two_places(revenue_per_cust)),
+            "collections_per_customer": float(round_two_places(collection_per_cust)),
+        }
+
+        if previous:
+            current["deltas"] = {
+                "energy_delivered": compute_delta(current["energy_delivered"], previous["energy_delivered"]),
+                "revenue_billed": compute_delta(current["revenue_billed"], previous["revenue_billed"]),
+                "energy_collected": compute_delta(current["energy_collected"], previous["energy_collected"]),
+                "billing_efficiency": compute_delta(current["billing_efficiency"], previous["billing_efficiency"]),
+                "collection_efficiency": compute_delta(current["collection_efficiency"], previous["collection_efficiency"]),
+                "atcc": compute_delta(current["atcc"], previous["atcc"]),
+                "customer_response_rate": compute_delta(current["customer_response_rate"], previous["customer_response_rate"]),
+                "revenue_billed_per_customer": compute_delta(current["revenue_billed_per_customer"], previous["revenue_billed_per_customer"]),
+                "collections_per_customer": compute_delta(current["collections_per_customer"], previous["collections_per_customer"]),
+            }
+
+        previous = current
+        data.append(current)
 
     return Response(data)
 
@@ -551,7 +560,6 @@ def commercial_all_business_districts_view(request):
     year = int(request.query_params.get("year", date.today().year))
     month = int(request.query_params.get("month", date.today().month))
 
-    # Determine the selected month range
     period_start = date(year, month, 1)
     period_end = period_start + relativedelta(months=1)
 
@@ -559,40 +567,67 @@ def commercial_all_business_districts_view(request):
     result = []
 
     for district in districts:
-        # Energy Delivered (MWh to GWh)
-        energy_delivered = EnergyDelivered.objects.filter(
+        # Energy Delivered in MWh
+        delivered_mwh = EnergyDelivered.objects.filter(
             feeder__business_district=district,
             date__gte=period_start,
             date__lt=period_end,
-        ).aggregate(Sum("energy_mwh"))['energy_mwh__sum'] or 0
+        ).aggregate(Sum("energy_mwh"))['energy_mwh__sum'] or Decimal(0)
 
-        energy_delivered /= 1000
+        # Energy Billed in MWh
+        billed_mwh = MonthlyEnergyBilled.objects.filter(
+            feeder__business_district=district,
+            month__gte=period_start,
+            month__lt=period_end,
+        ).aggregate(Sum("energy_mwh"))['energy_mwh__sum'] or Decimal(0)
+
 
         # Commercial Summary
         feeders = district.feeders.all()
         reps = SalesRepresentative.objects.filter(assigned_feeders__in=feeders).distinct()
         summaries = MonthlyCommercialSummary.objects.filter(
             sales_rep__in=reps,
-            month__year=period_start.year,
-            month__month=period_start.month,
+            month__gte=period_start,
+            month__lt=period_end,
         )
 
-        revenue_billed = summaries.aggregate(Sum("revenue_billed"))['revenue_billed__sum'] or 0
-        revenue_collected = summaries.aggregate(Sum("revenue_collected"))['revenue_collected__sum'] or 0
+        totals = summaries.aggregate(
+            revenue_billed=Sum("revenue_billed"),
+            revenue_collected=Sum("revenue_collected"),
+            customers_billed=Sum("customers_billed"),
+            customers_responded=Sum("customers_responded"),
+        )
 
-        billing_efficiency = ((revenue_billed/1000) / energy_delivered) if energy_delivered else 0
-        collection_efficiency = (revenue_collected / revenue_billed * 100) if revenue_billed else 0
-        atcc = billing_efficiency * collection_efficiency / 100 if energy_delivered and revenue_billed else 0
+        billed = totals["revenue_billed"] or Decimal(0)
+        collected = totals["revenue_collected"] or Decimal(0)
+        cust_billed = totals["customers_billed"] or 1  # prevent divide by zero
+        cust_resp = totals["customers_responded"] or 0
+
+        try:
+            billing_eff = (billed_mwh / delivered_mwh * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if delivered_mwh else Decimal(0)
+            collection_eff = (collected / billed * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if billed else Decimal(0)
+            atcc = (Decimal(100) - (billing_eff * collection_eff / 100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            energy_collected = (delivered_mwh * collection_eff / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if delivered_mwh else Decimal(0)
+        except:
+            billing_eff = collection_eff = atcc = Decimal(0)
+
+        response_rate = (Decimal(cust_resp) / Decimal(cust_billed) * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if cust_billed else Decimal(0)
+        revenue_per_customer = (billed / cust_billed).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if cust_billed else Decimal(0)
+        collections_per_customer = (collected / cust_billed).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if cust_billed else Decimal(0)
 
         result.append({
             "name": district.name,
-            "energy_delivered": round(energy_delivered, 2),
-            "revenue_billed": round(revenue_billed , 2),   
-            
-            "revenue_collected": round(revenue_collected , 2),
-            "billing_efficiency": round(billing_efficiency, 2),
-            "collection_efficiency": round(collection_efficiency, 2),
-            "atcc": round(atcc, 2),
+            "energy_delivered": float(delivered_mwh.quantize(Decimal("0.01"))),
+            "energy_billed": float(billed_mwh.quantize(Decimal("0.01"))),
+            "energy_collected": float(energy_collected),
+            "revenue_billed": float(billed.quantize(Decimal("0.01"))),
+            "revenue_collected": float(collected.quantize(Decimal("0.01"))),
+            "billing_efficiency": float(billing_eff),
+            "collection_efficiency": float(collection_eff),
+            "atcc": float(atcc),
+            "customer_response_rate": float(response_rate),
+            "revenue_billed_per_customer": float(revenue_per_customer),
+            "collections_per_customer": float(collections_per_customer),
         })
 
     return Response(result)
