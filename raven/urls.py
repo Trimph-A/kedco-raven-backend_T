@@ -38,6 +38,8 @@ from commercial.views import (
     commercial_state_metrics_view,
     commercial_all_business_districts_view,
     feeder_metrics,
+    feeder_performance_view,
+    feeders_by_location_view
 )
 
 from technical.views import (
@@ -139,6 +141,9 @@ urlpatterns = [
     path('api/metrics/commercial/state/',commercial_state_metrics_view, name='commercial-state-view'),
     path('api/metrics/commercial/business-districts/',commercial_all_business_districts_view, name='commercial-business-districts-view'),
     path('api/metrics/commercial/feeders/metrics/', feeder_metrics, name='feeder-metrics'),
+
+    path("api/metrics/feeders/performance/", feeder_performance_view, name="feeder-performance"),
+    path("api/metrics/feeders/list/", feeders_by_location_view, name="feeders-by-location"),
 
 
 ]

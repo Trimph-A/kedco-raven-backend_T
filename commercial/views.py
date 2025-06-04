@@ -641,44 +641,6 @@ def NullIfZero(field):
         output_field=FloatField(),
     )
 
-@api_view(['GET'])
-def top_least_feeders_atcc(request):
-    feeders = get_filtered_feeders(request)
-    if feeders is None:
-        return Response([], status=200)
-
-    annotated = feeders.annotate(
-        energy_delivered=Sum('dailyenergydelivered__energy_mwh'),
-        energy_billed=Sum('monthlyenergybilled__energy_mwh'),
-        revenue_collected=Sum('dailyrevenuecollected__amount'),
-        revenue_billed=Sum('commercial_monthly_revenue_billed__amount'),
-    ).annotate(
-        billing_efficiency=ExpressionWrapper(
-            100 * F('energy_billed') / NullIfZero(F('energy_delivered')),
-            output_field=FloatField()
-        ),
-        collection_efficiency=ExpressionWrapper(
-            100 * F('revenue_collected') / NullIfZero(F('revenue_billed')),
-            output_field=FloatField()
-        ),
-    ).annotate(
-        atcc=ExpressionWrapper(
-            100 - ((F('billing_efficiency') * F('collection_efficiency')) / 100),
-            output_field=FloatField()
-        )
-    )
-
-    # Example response structure (adjust as needed)
-    result = [
-        {
-            "name": f.name,
-            "atcc": f.atcc,
-            "billing_efficiency": f.billing_efficiency,
-            "collection_efficiency": f.collection_efficiency,
-        }
-        for f in annotated
-    ]
-    return Response(result, status=200)
 
 
 @api_view(['GET'])
@@ -834,3 +796,97 @@ class OverviewAPIView(APIView):
             "current": current,
             "history": overview_data[:-1]
         })
+    
+
+
+def calculate_atcc_metrics(feeder, start_date, end_date):
+    delivered = EnergyDelivered.objects.filter(
+        feeder=feeder,
+        date__gte=start_date,
+        date__lt=end_date
+    ).aggregate(energy_mwh_sum=Sum("energy_mwh"))['energy_mwh_sum'] or Decimal(0)
+
+    billed = MonthlyEnergyBilled.objects.filter(
+        feeder=feeder,
+        month__gte=start_date,
+        month__lt=end_date
+    ).aggregate(energy_mwh_sum=Sum("energy_mwh"))['energy_mwh_sum'] or Decimal(0)
+
+    summaries = MonthlyCommercialSummary.objects.filter(
+        sales_rep__assigned_feeders=feeder,
+        month__gte=start_date,
+        month__lt=end_date
+    ).aggregate(
+        revenue_collected_sum=Sum("revenue_collected"), 
+        revenue_billed_sum=Sum("revenue_billed")
+    )
+
+    revenue_collected = summaries["revenue_collected_sum"] or Decimal(0)
+    revenue_billed = summaries["revenue_billed_sum"] or Decimal(1)
+
+    try:
+        billing_eff = (billed / delivered * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if delivered else Decimal(0)
+        collection_eff = (revenue_collected / revenue_billed * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if revenue_billed else Decimal(0)
+        atcc = (Decimal(100) - (billing_eff * collection_eff / 100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        collected_energy = (delivered * collection_eff / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except:
+        billing_eff = collection_eff = atcc = collected_energy = Decimal(0)
+
+    return {
+        "name": feeder.name,
+        "energy_delivered": float(delivered),
+        "energy_billed": float(billed),
+        "energy_collected": float(collected_energy),
+        "atcc": float(atcc),
+        "voltage_level": feeder.voltage_level,
+    }
+
+
+@api_view(["GET"])
+def feeder_performance_view(request):
+    year = int(request.query_params.get("year", date.today().year))
+    month = int(request.query_params.get("month", date.today().month))
+    start_date = date(year, month, 1)
+    end_date = start_date + relativedelta(months=1)
+
+    feeders = Feeder.objects.all()
+    feeder_data = []
+
+    for feeder in feeders:
+        metrics = calculate_atcc_metrics(feeder, start_date, end_date)
+        feeder_data.append(metrics)
+
+    sorted_by_atcc = sorted(feeder_data, key=lambda x: x["atcc"])
+    return Response({
+        "top_5": sorted_by_atcc[:5],
+        "bottom_5": sorted_by_atcc[-5:][::-1]
+    })
+
+
+@api_view(["GET"])
+def feeders_by_location_view(request):
+    state_name = request.query_params.get("state")
+    district_name = request.query_params.get("business_district")
+    year = int(request.query_params.get("year", date.today().year))
+    month = int(request.query_params.get("month", date.today().month))
+    start_date = date(year, month, 1)
+    end_date = start_date + relativedelta(months=1)
+
+    filters = Q()
+
+    if district_name:
+        filters = Q(business_district__name__iexact=district_name)
+    elif state_name:
+        state = State.objects.filter(name__iexact=state_name).first()
+        if not state:
+            return Response({"error": "Invalid state"}, status=400)
+        filters = Q(business_district__state=state)
+
+    feeders = Feeder.objects.filter(filters)
+    result = []
+
+    for feeder in feeders:
+        metrics = calculate_atcc_metrics(feeder, start_date, end_date)
+        result.append(metrics)
+
+    return Response(result)
