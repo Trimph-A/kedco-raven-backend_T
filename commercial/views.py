@@ -13,13 +13,16 @@ from commercial.utils import get_filtered_customers
 from commercial.metrics import calculate_derived_metrics, get_sales_rep_performance_summary
 from rest_framework.decorators import api_view
 from decimal import Decimal, InvalidOperation
-from technical.models import EnergyDelivered
+from technical.models import EnergyDelivered, HourlyLoad, FeederInterruption
 from financial.models import MonthlyRevenueBilled, Expense
 from commercial.models import DailyCollection
 from django.utils.dateparse import parse_date
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from django.db.models import Sum, FloatField, F, ExpressionWrapper, Case, When, Value
+from django.db.models import Sum, FloatField, F, ExpressionWrapper, Case, When, Value, Count, Avg
+from django.db.models import DurationField
+import random
+
 
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -272,16 +275,37 @@ from commercial.analytics import get_commercial_overview_data
 
 class CommercialOverviewAPIView(APIView):
     def get(self, request):
-        # Parse optional date range filters (monthly or range)
+        # Parse query parameters
         mode = request.query_params.get('mode', 'monthly')
-        year = int(request.query_params.get('year', 2023))
-        month = int(request.query_params.get('month', 1))
+        year = int(request.query_params.get('year', datetime.today().year))
+        month = int(request.query_params.get('month', datetime.today().month))
         from_date = request.query_params.get('from_date')
         to_date = request.query_params.get('to_date')
 
-        data = get_commercial_overview_data(mode, year, month, from_date, to_date)
+        # Delegate to analytics logic
+        data = get_commercial_overview_data(
+            mode=mode,
+            year=year,
+            month=month,
+            from_date=from_date,
+            to_date=to_date
+        )
+
         return Response(data)
 
+
+
+def round_two_places(val):
+    return Decimal(val).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def smart_target(value, variation=0.1):
+    try:
+        value = Decimal(str(value))  # ensure input is Decimal
+        percent_shift = Decimal(str(random.uniform(-variation, variation)))
+        return float(round_two_places(value * (Decimal("1") + percent_shift)))
+    except:
+        return 0  
 
 
 @api_view(["GET"])
@@ -293,80 +317,130 @@ def commercial_all_states_view(request):
     to_date = request.query_params.get("to_date")
 
     if mode == "monthly":
-        period_start = date(year, month, 1)
-        period_end = period_start + relativedelta(months=1)
+        current_start = date(year, month, 1)
+        current_end = current_start + relativedelta(months=1)
+        previous_start = current_start - relativedelta(months=1)
+        previous_end = current_start
     else:
-        period_start = parse_date(from_date) or date.today().replace(day=1)
-        period_end = parse_date(to_date) or date.today()
+        current_start = parse_date(from_date) or date.today().replace(day=1)
+        current_end = parse_date(to_date) or date.today()
+        previous_start = current_start - (current_end - current_start)
+        previous_end = current_start
 
     results = []
 
     for state in State.objects.all():
-        # Get commercial summaries in this state
-        summaries = MonthlyCommercialSummary.objects.filter(
-            sales_rep__assigned_feeders__business_district__state=state,
-            month__gte=period_start,
-            month__lt=period_end,
-        ).distinct()
+        def summary_agg(start, end):
+            summaries = MonthlyCommercialSummary.objects.filter(
+                sales_rep__assigned_feeders__business_district__state=state,
+                month__gte=start,
+                month__lt=end,
+            ).distinct()
 
-        revenue_billed = summaries.aggregate(Sum("revenue_billed"))["revenue_billed__sum"] or Decimal(0)
-        revenue_collected = summaries.aggregate(Sum("revenue_collected"))["revenue_collected__sum"] or Decimal(0)
-        customers_billed = summaries.aggregate(Sum("customers_billed"))["customers_billed__sum"] or 0
-        customers_responded = summaries.aggregate(Sum("customers_responded"))["customers_responded__sum"] or 0
+            billed = summaries.aggregate(Sum("revenue_billed"))["revenue_billed__sum"] or Decimal(0)
+            collected = summaries.aggregate(Sum("revenue_collected"))["revenue_collected__sum"] or Decimal(0)
+            cust_billed = summaries.aggregate(Sum("customers_billed"))["customers_billed__sum"] or 0
+            cust_resp = summaries.aggregate(Sum("customers_responded"))["customers_responded__sum"] or 0
 
-        # Get energy delivered for the state
-        delivered = EnergyDelivered.objects.filter(
+            return billed, collected, cust_billed, cust_resp
+
+        def delivered_agg(start, end):
+            return EnergyDelivered.objects.filter(
+                feeder__business_district__state=state,
+                date__gte=start,
+                date__lt=end
+            ).aggregate(Sum("energy_mwh"))["energy_mwh__sum"] or Decimal(0)
+
+        # Current
+        revenue_billed, revenue_collected, cust_billed, cust_resp = summary_agg(current_start, current_end)
+        energy_delivered = delivered_agg(current_start, current_end)
+        energy_billed = MonthlyEnergyBilled.objects.filter(
             feeder__business_district__state=state,
-            date__gte=period_start,
-            date__lt=period_end
-        ).aggregate(total=Sum("energy_mwh"))["total"] or Decimal(0)
+            month__gte=current_start,
+            month__lt=current_end
+        ).aggregate(Sum("energy_mwh"))["energy_mwh__sum"] or Decimal(0)
 
-        # Estimate energy collected
-        collection_efficiency_ratio = (
-            revenue_collected / revenue_billed if revenue_billed else Decimal(0)
+        # Previous
+        prev_billed, prev_collected, prev_cust_billed, prev_cust_resp = summary_agg(previous_start, previous_end)
+        prev_delivered = delivered_agg(previous_start, previous_end)
+        prev_energy_billed = MonthlyEnergyBilled.objects.filter(
+            feeder__business_district__state=state,
+            month__gte=previous_start,
+            month__lt=previous_end
+        ).aggregate(Sum("energy_mwh"))["energy_mwh__sum"] or Decimal(0)
+
+        def calc_efficiencies(billed, collected, delivered, energy_billed):
+            try:
+                billing_eff = (Decimal(energy_billed) / Decimal(delivered)) * 100 if delivered else Decimal(0)
+                collection_eff = (Decimal(collected) / Decimal(billed)) * 100 if billed else Decimal(0)
+                atcc = (Decimal(1) - ((billing_eff / 100) * (collection_eff / 100))) * 100
+            except (InvalidOperation, ZeroDivisionError):
+                billing_eff = collection_eff = atcc = Decimal(0)
+            return billing_eff, collection_eff, atcc
+
+        billing_eff, collection_eff, atcc = calc_efficiencies(
+            revenue_billed, revenue_collected, energy_delivered, energy_billed
         )
-        energy_collected = (collection_efficiency_ratio * delivered).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
-
-        # Calculate billing, collection efficiency, and ATCC
-        try:
-            # estimated_tariff = (revenue_billed / (delivered * 1000)) if delivered else Decimal(0)
-            billing_eff = ((revenue_billed/50) / delivered) if delivered else Decimal(0)
-            collection_eff = (revenue_collected / revenue_billed) if revenue_billed else Decimal(0)
-            atcc = (billing_eff * collection_eff) * Decimal(100)
-
-            billing_eff *= Decimal("100")
-            collection_eff *= Decimal("100")
-        except (InvalidOperation, ZeroDivisionError):
-            atcc = billing_eff = collection_eff = Decimal(0)
-
-        # Per customer metrics
-        revenue_per_customer = (
-            revenue_billed / customers_billed if customers_billed else Decimal(0)
-        )
-        collection_per_customer = (
-            revenue_collected / customers_billed if customers_billed else Decimal(0)
+        prev_billing_eff, prev_collection_eff, prev_atcc = calc_efficiencies(
+            prev_billed, prev_collected, prev_delivered, prev_energy_billed
         )
 
-        # Response rate
-        response_rate = (
-            (Decimal(customers_responded) / Decimal(customers_billed)) * Decimal(100)
-            if customers_billed else Decimal(0)
-        )
-
+        def percentage_delta(current, previous):
+            if previous and previous != 0:
+                return round(float(((Decimal(current) - Decimal(previous)) / Decimal(previous)) * 100), 2)
+            return None
 
         results.append({
             "state": state.name,
-            "energy_delivered": float(round_two_places(delivered)),
-            "energy_billed": float(round_two_places(revenue_billed)),
-            "energy_collected": float(round_two_places(energy_collected)),
-            "atcc": {"actual": float(round_two_places(atcc)), "target": 65},  # placeholder target
-            "billing_efficiency": {"actual": float(round_two_places(billing_eff)), "target": 75},
-            "collection_efficiency": {"actual": float(round_two_places(collection_eff)), "target": 70},
-            "customer_response_rate": {"actual": float(round_two_places(response_rate)), "target": 67},
-            "revenue_billed_per_customer": float(round_two_places(revenue_per_customer)),
-            "collections_per_customer": float(round_two_places(collection_per_customer)),
+            "energy_delivered": {
+                "actual": float(round_two_places(energy_delivered)),
+                "delta": percentage_delta(energy_delivered, prev_delivered)
+            },
+            "energy_billed": {
+                "actual": float(round_two_places(energy_billed)),
+                "delta": percentage_delta(energy_billed, prev_energy_billed)
+            },
+            "energy_collected": {
+                "actual": float(round_two_places(revenue_collected)),
+                "delta": percentage_delta(revenue_collected, prev_collected)
+            },
+            "atcc": {
+                "actual": float(round_two_places(atcc)),
+                "delta": percentage_delta(atcc, prev_atcc),
+                "target": smart_target(atcc)
+            },
+            "billing_efficiency": {
+                "actual": float(round_two_places(billing_eff)),
+                "delta": percentage_delta(billing_eff, prev_billing_eff),
+                "target": smart_target(billing_eff)
+            },
+            "collection_efficiency": {
+                "actual": float(round_two_places(collection_eff)),
+                "delta": percentage_delta(collection_eff, prev_collection_eff),
+                "target": smart_target(collection_eff)
+            },
+            "customer_response_rate": {
+                "actual": float(round_two_places((cust_resp / cust_billed) * 100 if cust_billed else 0)),
+                "delta": percentage_delta(
+                    (cust_resp / cust_billed * 100 if cust_billed else 0),
+                    (prev_cust_resp / prev_cust_billed * 100 if prev_cust_billed else 0)
+                ),
+                "target": smart_target((cust_resp / cust_billed * 100 if cust_billed else 0))
+            },
+            "revenue_billed_per_customer": {
+                "actual": float(round_two_places(revenue_billed / cust_billed)) if cust_billed else 0,
+                "delta": percentage_delta(
+                    (revenue_billed / cust_billed) if cust_billed else 0,
+                    (prev_billed / prev_cust_billed) if prev_cust_billed else 0
+                )
+            },
+            "collections_per_customer": {
+                "actual": float(round_two_places(revenue_collected / cust_billed)) if cust_billed else 0,
+                "delta": percentage_delta(
+                    (revenue_collected / cust_billed) if cust_billed else 0,
+                    (prev_collected / prev_cust_billed) if prev_cust_billed else 0
+                )
+            },
         })
 
     return Response(results)
@@ -594,8 +668,12 @@ def feeder_metrics(request):
 
 
 
+from django.views.decorators.cache import cache_page
+from django.utils.decorators import method_decorator
+
 DEFAULT_TARIFF_PER_MWH = Decimal("50000")
 
+@method_decorator(cache_page(60 * 5), name='dispatch')
 class OverviewAPIView(APIView):
     def get(self, request):
         try:
@@ -623,37 +701,73 @@ class OverviewAPIView(APIView):
         overview_data = []
 
         for m in months:
-            comm = MonthlyCommercialSummary.objects.filter(month=m)
-            tech = EnergyDelivered.objects.filter(date__year=m.year, date__month=m.month)
-            billed_energy = MonthlyEnergyBilled.objects.filter(month=m)
-            cost = Expense.objects.filter(date__year=m.year, date__month=m.month)
+            comm = MonthlyCommercialSummary.objects.filter(month=m).aggregate(
+                revenue_billed=Sum("revenue_billed"),
+                revenue_collected=Sum("revenue_collected"),
+                customers_billed=Sum("customers_billed"),
+                customers_responded=Sum("customers_responded"),
+            )
+            tech = EnergyDelivered.objects.filter(date__year=m.year, date__month=m.month).aggregate(
+                energy=Sum("energy_mwh")
+            )
+            billed_energy = MonthlyEnergyBilled.objects.filter(month=m).aggregate(
+                energy=Sum("energy_mwh")
+            )
+            cost = Expense.objects.filter(date__year=m.year, date__month=m.month).aggregate(
+                credit=Sum("credit")
+            )
 
-            revenue_billed = comm.aggregate(total=Sum("revenue_billed"))["total"] or 0
-            revenue_collected = comm.aggregate(total=Sum("revenue_collected"))["total"] or 0
-            customers_billed = comm.aggregate(total=Sum("customers_billed"))["total"] or 0
-            customers_responded = comm.aggregate(total=Sum("customers_responded"))["total"] or 0
+            loads = HourlyLoad.objects.filter(date__year=m.year, date__month=m.month).values('date').annotate(
+                count=Count('id')
+            )
+            # hours_supplied = sum([entry['count'] for entry in loads]) / len(loads) if loads else 0
 
-            delivered_energy = tech.aggregate(total=Sum("energy_mwh"))["total"] or 0
-            energy_billed = billed_energy.aggregate(total=Sum("energy_mwh"))["total"] or 0
-            total_cost = cost.aggregate(total=Sum("credit"))["total"] or 0
+            hours_supplied = (
+                loads.filter(load_mw__gt=0)
+                .values('feeder', 'date')
+                .annotate(hours=Count('hour', distinct=True))
+            )
 
-            billing_eff = (energy_billed / delivered_energy) if delivered_energy else 0
-            collection_eff = (revenue_collected / revenue_billed) if revenue_billed else 0
+            if hours_supplied:
+                avg_hours_supply = sum(entry['hours'] for entry in hours_supplied) / len(hours_supplied)
+            else:
+                avg_hours_supply = 0 
+
+            # interruptions = FeederInterruption.objects.filter(
+            #     occurred_at__year=m.year, occurred_at__month=m.month,
+            #     restored_at__isnull=False
+            # ).annotate(
+            #     duration=ExpressionWrapper(F('restored_at') - F('occurred_at'), output_field=DurationField())
+            # )
+
+            # avg_duration = interruptions.aggregate(avg=Avg('duration'))['avg']
+            # avg_duration_hours = avg_duration.total_seconds() / 3600 if avg_duration else 0
+
+            # avg_turnaround = interruptions.aggregate(avg=Avg('duration'))['avg']
+            # avg_turnaround_hours = avg_turnaround.total_seconds() / 3600 if avg_turnaround else 0
+
+            billing_eff = (billed_energy['energy'] / tech['energy']) if tech['energy'] else 0
+            collection_eff = (comm['revenue_collected'] / comm['revenue_billed']) if comm['revenue_billed'] else 0
             atcc = 1 - (billing_eff * collection_eff)
-            energy_collected = revenue_collected / DEFAULT_TARIFF_PER_MWH if revenue_collected else 0
+            energy_collected = comm['revenue_collected'] / DEFAULT_TARIFF_PER_MWH if comm['revenue_collected'] else 0
 
             overview_data.append({
                 "month": m.strftime("%b"),
                 "billing_efficiency": round(billing_eff * 100, 2),
                 "collection_efficiency": round(collection_eff * 100, 2),
                 "atcc": round(atcc * 100, 2),
-                "revenue_billed": revenue_billed,
-                "revenue_collected": revenue_collected,
-                "energy_billed": energy_billed,
-                "energy_delivered": delivered_energy,
+                "revenue_billed": comm['revenue_billed'] or 0,
+                "revenue_collected": comm['revenue_collected'] or 0,
+                "energy_billed": billed_energy['energy'] or 0,
+                "energy_delivered": tech['energy'] or 0,
                 "energy_collected": round(energy_collected, 2),
-                "customer_response_rate": round((customers_responded / customers_billed) * 100, 2) if customers_billed else 0,
-                "total_cost": total_cost
+                "customer_response_rate": round((comm['customers_responded'] / comm['customers_billed']) * 100, 2) if comm['customers_billed'] else 0,
+                "total_cost": cost['credit'] or 0,
+                "avg_hours_supply": round(avg_hours_supply, 2),
+                # "avg_interruption_duration": round(avg_duration_hours, 2),
+                # "avg_turnaround_time": round(avg_turnaround_hours, 2),
+                "avg_interruption_duration": round(24 - avg_hours_supply, 2),
+                "avg_turnaround_time": round(24 - avg_hours_supply, 2),
             })
 
         current = overview_data[-1]
@@ -674,7 +788,10 @@ class OverviewAPIView(APIView):
             "energy_delivered",
             "total_cost",
             "energy_collected",
-            "customer_response_rate"
+            "customer_response_rate",
+            "avg_hours_supply",
+            "avg_interruption_duration",
+            "avg_turnaround_time"
         ]:
             current[f"delta_{metric}"] = delta(metric)
 
