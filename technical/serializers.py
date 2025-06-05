@@ -25,3 +25,12 @@ class DailyHoursOfSupplySerializer(serializers.ModelSerializer):
     class Meta:
         model = DailyHoursOfSupply
         fields = '__all__'
+
+
+class FeederAvailabilitySerializer(serializers.Serializer):
+    feeder_name = serializers.CharField()
+    voltage_level = serializers.CharField()
+    avg_hours_of_supply = serializers.FloatField()
+    duration_of_interruptions = serializers.FloatField()
+    turnaround_time = serializers.FloatField()
+    ftc = serializers.IntegerField()

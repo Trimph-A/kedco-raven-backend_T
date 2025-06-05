@@ -83,6 +83,11 @@ class FinancialSummaryView(APIView):
         return Response(data)
     
 
+
+
+
+
+
 @api_view(["GET"])
 def financial_overview_view(request):
     year = int(request.query_params.get("year", date.today().year))

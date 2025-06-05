@@ -48,7 +48,13 @@ from technical.views import (
     FeederInterruptionViewSet,
     DailyHoursOfSupplyViewSet,
     TechnicalMetricsView,
-    TechnicalMonthlySummaryView
+    TechnicalMonthlySummaryView,
+    technical_overview_view,
+    all_states_technical_summary,
+    state_technical_summary,
+    all_business_districts_technical_summary,
+    business_district_technical_summary,
+    FeederAvailabilityOverview
 )
 
 from financial.views import (
@@ -60,7 +66,7 @@ from financial.views import (
     financial_feeder_view,
     sales_rep_performance_view,
     list_sales_reps,
-    sales_rep_global_summary_view
+    sales_rep_global_summary_view,
 )
 from financial.views import GLBreakdownViewSet
 
@@ -155,6 +161,13 @@ urlpatterns = [
     path("api/financial/sales-reps/<uuid:rep_id>/performance/", sales_rep_performance_view),
     path("api/financial/sales-reps/", list_sales_reps),
     path("api/financial/sales-reps/summary/", sales_rep_global_summary_view),
+
+    path('api/technical/overview/', technical_overview_view, name='technical-overview'),
+    path('api/technical/overview/all-states/', all_states_technical_summary, name='all-states-technical-summary'),
+    path('api/technical/overview/state/', state_technical_summary, name='state-technical-summary'),
+    path('api/technical/overview/business-districts/', all_business_districts_technical_summary, name='business-districts-technical-summary'),
+    path('api/technical/overview/business-district/', business_district_technical_summary, name='business-district-technical-summary'),
+    path('api/technical/availability-overview/', FeederAvailabilityOverview.as_view(), name='feeder-availability-overview'),
 
 
 ]
