@@ -20,7 +20,7 @@ from django.utils.timezone import now
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from datetime import date
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 from commercial.models import MonthlyCommercialSummary, DailyRevenueCollected, DailyEnergyDelivered
 from django.db.models import Q
 from .metrics import get_financial_feeder_data

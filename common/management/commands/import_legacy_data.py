@@ -10,7 +10,7 @@ from django.utils.text import slugify
 from django.utils.timezone import make_aware
 from django.conf import settings
 from datetime import datetime, time
-import pymysql
+import pymysql # type: ignore
 
 
 def parse_nullable(value, fallback=None):
@@ -519,7 +519,7 @@ class Command(BaseCommand):
     def import_energy_delivered(self, conn):
         from technical.models import EnergyDelivered
         from common.models import Feeder
-        from tqdm import tqdm  # Ensure tqdm is installed
+        from tqdm import tqdm  # type: ignore
 
         self.stdout.write(self.style.HTTP_INFO("\nImporting Energy Delivered..."))
         count = 0

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 from django.db.models import Sum
 from django.utils.dateparse import parse_date
 from decimal import Decimal, InvalidOperation

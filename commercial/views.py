@@ -18,7 +18,7 @@ from financial.models import MonthlyRevenueBilled, Expense
 from commercial.models import DailyCollection
 from django.utils.dateparse import parse_date
 from datetime import date
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 from django.db.models import Sum, FloatField, F, ExpressionWrapper, Case, When, Value, Count, Avg
 from django.db.models import DurationField
 import random

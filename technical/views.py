@@ -158,7 +158,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.db.models import Avg, Sum, Count
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 
 from technical.models import EnergyDelivered, HourlyLoad, FeederInterruption
 from common.models import Feeder
@@ -309,7 +309,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.db.models import Avg, Sum, Max
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 
 from technical.models import HourlyLoad, FeederInterruption
 from common.models import Feeder
@@ -397,7 +397,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.db.models import Avg, Sum, Count, Max
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 
 from technical.models import HourlyLoad, FeederInterruption, EnergyDelivered
 from common.models import Feeder
@@ -542,7 +542,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.db.models import Count, Max, Avg
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 
 from technical.models import HourlyLoad, FeederInterruption
 from common.models import Feeder
@@ -633,7 +633,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.db.models import Avg, Count, Max
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 
 from technical.models import HourlyLoad, FeederInterruption
 from common.models import Feeder

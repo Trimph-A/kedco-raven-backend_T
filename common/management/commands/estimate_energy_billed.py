@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db.models import Sum
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from dateutil.relativedelta import relativedelta # type: ignore
 from technical.models import EnergyDelivered
 from commercial.models import MonthlyEnergyBilled
 from common.models import Feeder
