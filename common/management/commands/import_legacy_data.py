@@ -11,6 +11,7 @@ from django.utils.timezone import make_aware
 from django.conf import settings
 from datetime import datetime, time
 import pymysql # type: ignore
+from tqdm import tqdm # type: ignore
 
 
 def parse_nullable(value, fallback=None):
@@ -36,7 +37,7 @@ class Command(BaseCommand):
             # self.import_districts(conn)
             # self.import_injection_stations(conn)
             # self.import_feeders(conn)
-            # self.import_feeder_interruptions(conn)
+            self.import_feeder_interruptions(conn)
             # self.import_gl_breakdowns(conn)
             # self.import_expenses(conn)
             # self.import_hourly_load(conn)
@@ -44,7 +45,7 @@ class Command(BaseCommand):
             # self.import_sales_reps(conn)
             # self.import_daily_collections(conn)
             # self.import_energy_delivered(conn)
-            self.import_monthly_commercial_summary(conn)
+            # self.import_monthly_commercial_summary(conn)
 
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
@@ -116,9 +117,10 @@ class Command(BaseCommand):
     def import_feeders(self, conn):
         self.stdout.write(self.style.HTTP_INFO("\nImporting Feeders..."))
         count = 0
+
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT feeder_id, feeder_name, injection_station_id, district_id, feeder_type
+                SELECT feeder_id, feeder_name, injection_station_id, district_id, feeder_type, service_band
                 FROM feeders
             """)
             for row in cursor.fetchall():
@@ -130,7 +132,13 @@ class Command(BaseCommand):
                 substation = InjectionSubstation.objects.filter(slug=row["injection_station_id"].strip()).first()
                 district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
 
-                if substation and district:
+                # Get or create the Band instance
+                band_name = (row.get("service_band") or "").strip().upper()
+                band = Band.objects.filter(name=band_name).first()
+                if not band and band_name:
+                    band = Band.objects.create(name=band_name)
+
+                if substation and district and band:
                     _, created = Feeder.objects.get_or_create(
                         slug=slug,
                         defaults={
@@ -138,11 +146,13 @@ class Command(BaseCommand):
                             "substation": substation,
                             "voltage_level": voltage_level,
                             "business_district": district,
+                            "band": band,
                         }
                     )
                     count += int(created)
 
         self.stdout.write(self.style.SUCCESS(f"Feeders imported: {count} new entries."))
+
 
 
 
@@ -359,25 +369,29 @@ class Command(BaseCommand):
 
 
     def import_feeder_interruptions(self, conn):
-        from technical.models import FeederInterruption
         self.stdout.write(self.style.HTTP_INFO("\nImporting Feeder Interruptions..."))
+
         count = 0
         skipped = 0
 
         FAULT_TYPE_MAP = {
-            "Earth Fault": "E/F",
-            "Overcurrent Fault": "O/C",
-            "Overcurrent and Earth Fault": "O/C & E/F",
+            "E/F": "E/F",
+            "O/C": "O/C",
+            "O/C & E/F": "O/C & E/F",
             None: "N/A",
             "": "N/A",
         }
 
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT feeder_id, fault_occurrence, fault_resolve, fault_type, brief_description
-                FROM feeder_faults
+                SELECT feeder_id, date, time_of_occurrence, time_of_restoration,
+                       load_interrupted_mw, fault_type, description
+                FROM technicalenergyfault
             """)
-            for row in cursor.fetchall():
+
+            rows = cursor.fetchall()
+
+            for row in tqdm(rows, desc="Processing Fault Records", unit="row"):
                 feeder_slug = row["feeder_id"].strip()
                 feeder = Feeder.objects.filter(slug=feeder_slug).first()
 
@@ -386,19 +400,20 @@ class Command(BaseCommand):
                     skipped += 1
                     continue
 
+                fault_date = row["date"]
+                fault_time = row["time_of_occurrence"]
+                restore_time = row["time_of_restoration"]
+                description = parse_nullable(row.get("description"), "").strip()
                 interruption_type = FAULT_TYPE_MAP.get(row["fault_type"], row["fault_type"] or "N/A")
-                occurred_at = row["fault_occurrence"]
-                restored_at = row.get("fault_resolve") or None  # Could be NULL
-                description = parse_nullable(row.get("brief_description"), "").strip()
+                load_interrupted = row.get("load_interrupted_mw") or 0.0
 
-                if occurred_at and isinstance(occurred_at, datetime.datetime) and occurred_at.tzinfo is None:
-                    occurred_at = make_aware(occurred_at)
+                # Combine date and time, and make timezone-aware
+                occurred_at = make_aware(datetime.datetime.combine(fault_date, fault_time))
+                restored_at = None
+                if restore_time:
+                    restored_at = make_aware(datetime.datetime.combine(fault_date, restore_time))
 
-                if restored_at and isinstance(restored_at, datetime.datetime) and restored_at.tzinfo is None:
-                    restored_at = make_aware(restored_at)
-
-
-                # Ensure no duplicates
+                # Avoid duplicates
                 exists = FeederInterruption.objects.filter(
                     feeder=feeder,
                     occurred_at=occurred_at,
@@ -411,11 +426,12 @@ class Command(BaseCommand):
                         occurred_at=occurred_at,
                         restored_at=restored_at,
                         interruption_type=interruption_type,
-                        description=description
+                        description=description,
+                        load_interrupted_mw=load_interrupted,
                     )
                     count += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Feeder interruptions imported: {count} entries."))
+        self.stdout.write(self.style.SUCCESS(f"\nFeeder interruptions imported: {count} entries."))
         self.stdout.write(self.style.WARNING(f"Skipped: {skipped} rows (e.g., missing feeder)"))
 
 
@@ -519,7 +535,6 @@ class Command(BaseCommand):
     def import_energy_delivered(self, conn):
         from technical.models import EnergyDelivered
         from common.models import Feeder
-        from tqdm import tqdm  # type: ignore
 
         self.stdout.write(self.style.HTTP_INFO("\nImporting Energy Delivered..."))
         count = 0
