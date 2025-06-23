@@ -9,7 +9,7 @@ class UUIDModel(models.Model):
         abstract = True
 
 class Band(UUIDModel, models.Model):
-    name = models.CharField(max_length=50, unique=True)  # e.g., Band A, Band B
+    name = models.CharField(max_length=50, unique=True)  # e.g., A, B
     description = models.TextField(blank=True)
     slug = models.SlugField(unique=True, blank=True)
 
@@ -56,7 +56,7 @@ class BusinessDistrict(UUIDModel, models.Model):
 
 
 class InjectionSubstation(UUIDModel, models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True, blank=True)
 
     def save(self, *args, **kwargs):
@@ -106,8 +106,8 @@ class DistributionTransformer(UUIDModel, models.Model):
         super().save(*args, **kwargs)
 
 
-    class Meta:
-        unique_together = ('name', 'feeder')
+    # class Meta:
+    #     unique_together = ('name', 'feeder')
 
     def __str__(self):
         return f"{self.name} - {self.feeder}"

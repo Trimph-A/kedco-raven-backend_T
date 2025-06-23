@@ -787,3 +787,62 @@ class FeederAvailabilityOverview(APIView):
 
         serializer = FeederAvailabilitySerializer(data, many=True)
         return Response(serializer.data)
+
+
+
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from datetime import datetime
+from django.db.models import Avg, Count
+from common.models import Feeder
+from commercial.models import SalesRepresentative
+from technical.models import EnergyDelivered
+
+
+@api_view(["GET"])
+def service_band_technical_metrics(request):
+    state = request.GET.get("state")
+    year = int(request.GET.get("year", datetime.now().year))
+    month = int(request.GET.get("month", datetime.now().month))
+
+    # Get feeders with bands and optional state filtering
+    feeders = Feeder.objects.filter(band__isnull=False)
+    if state:
+        feeders = feeders.filter(business_district__state__name=state)
+
+    date_from, date_to = get_month_range(year, month)
+
+    results = {}
+
+    for band in feeders.values_list("band__name", flat=True).distinct():
+        band_feeders = feeders.filter(band__name=band)
+        feeder_ids = band_feeders.values_list("id", flat=True)
+
+        # Simulated metrics
+        feeder_count = band_feeders.count()
+
+        sales_reps = SalesRepresentative.objects.filter(
+            assigned_transformers__feeder__in=feeder_ids
+        ).distinct()
+        customer_count = sales_reps.count() * 100  # Simulated
+
+        avg_peak_load = round(
+            EnergyDelivered.objects.filter(
+                feeder__in=feeder_ids,
+                date__range=(date_from, date_to)
+            ).aggregate(avg=Avg("energy_mwh"))["avg"] or 0, 2
+        )
+
+        duration_of_interruption = 20 + hash(band) % 10  # Simulated
+        turnaround_time = 10 + hash(band[::-1]) % 15  # Simulated
+
+        results[band] = {
+            "feeder_count": feeder_count,
+            "customer_count": customer_count,
+            "avg_peak_load": avg_peak_load,
+            "duration_of_interruption": duration_of_interruption,
+            "turnaround_time": turnaround_time,
+        }
+
+    return Response({"results": results})

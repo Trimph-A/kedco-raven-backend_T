@@ -13,6 +13,7 @@ from common.models import State
 from commercial.models import DailyCollection
 from common.utils.filters import get_month_range_from_request
 from django.shortcuts import get_object_or_404
+from commercial.models import MonthlyCommercialSummary
 
 
 
@@ -106,10 +107,15 @@ class StaffStateOverviewView(APIView):
 
             # Collections per staff
 
-            total_collection = DailyCollection.objects.filter(
-                sales_rep__assigned_feeders__substation__district__state=state,
-                date__range=(from_date, to_date)
-            ).aggregate(total=Sum('amount'))['total'] or 0
+            # total_collection = DailyCollection.objects.filter(
+            #     sales_rep__assigned_feeders__substation__district__state__name=state,
+            #     date__range=(from_date, to_date)
+            # ).aggregate(total=Sum('amount'))['total'] or 0
+
+            total_collection = MonthlyCommercialSummary.objects.filter(
+                sales_rep__assigned_feeders__business_district__state__name=state,
+                month__range=(from_date, to_date)
+            ).aggregate(total=Sum('revenue_collected'))['total'] or 0
 
 
             collections_per_staff = round(total_collection / active_count) if active_count else 0

@@ -2,7 +2,7 @@ from django.db.models import Sum
 from commercial.utils import get_filtered_feeders
 from commercial.date_filters import get_date_range_from_request
 from financial.models import *
-from commercial.models import MonthlyCommercialSummary
+from commercial.models import MonthlyCommercialSummary, SalesRepresentative
 
 def get_total_cost(request):
     feeders = get_filtered_feeders(request)
@@ -128,7 +128,9 @@ def get_financial_feeder_data(request):
 
     for feeder in feeders:
         # Get sales reps linked to this feeder
-        sales_reps = feeder.salesrepresentative_set.all()
+        sales_reps = SalesRepresentative.objects.filter(
+            assigned_transformers__feeder=feeder
+        ).distinct()
 
         # Aggregate commercial summary
         summary = MonthlyCommercialSummary.objects.filter(

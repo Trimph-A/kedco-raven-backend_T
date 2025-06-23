@@ -347,3 +347,274 @@ def sales_rep_global_summary_view(request):
         "active_accounts": active_accounts,
         "suspended_accounts": 0
     })
+
+
+import random
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from datetime import date
+from django.db.models import Sum
+from decimal import Decimal
+
+from financial.models import Expense
+from commercial.models import MonthlyCommercialSummary
+from common.models import State
+
+
+class FinancialAllStatesView(APIView):
+    def get(self, request):
+        year = int(request.GET.get("year"))
+        month = int(request.GET.get("month"))
+        target_month = date(year, month, 1)
+
+        results = []
+
+        for state in State.objects.all():
+            # --- Total Cost (from Expenses) ---
+            expense_total = Expense.objects.filter(
+                date__year=year,
+                date__month=month,
+                district__state=state
+            ).aggregate(total_cost=Sum("credit"))["total_cost"] or Decimal("0")
+
+            # --- Revenue Billed and Collections (from MonthlyCommercialSummary) ---
+            sales_reps = SalesRepresentative.objects.filter(
+                assigned_transformers__feeder__business_district__state=state
+            ).distinct()
+
+            commercial_data = MonthlyCommercialSummary.objects.filter(
+                month=target_month,
+                sales_rep__in=sales_reps
+            ).aggregate(
+                revenue_billed=Sum("revenue_billed"),
+                collections=Sum("revenue_collected")
+            )
+
+            revenue_billed = commercial_data["revenue_billed"] or Decimal("0")
+            collections = commercial_data["collections"] or Decimal("0")
+
+            # --- Random Tariff Data ---
+            myto_tariff = Decimal(random.choice([59, 60, 61]))
+            actual_tariff = Decimal(random.choice([70, 72, 68]))
+            tariff_loss = myto_tariff - actual_tariff
+
+            # --- Compile State Metrics ---
+            results.append({
+                "state": state.name,
+                "total_cost": round(expense_total, 2),
+                "revenue_billed": round(revenue_billed, 2),
+                "collections": round(collections, 2),
+                "myto_allowed_tariff": f"{myto_tariff}",
+                "actual_tariff_collected": f"{actual_tariff}",
+                "tariff_loss": f"{tariff_loss}"
+            })
+
+        return Response(results, status=status.HTTP_200_OK)
+
+
+
+import random
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from datetime import date
+from django.db.models import Sum
+from decimal import Decimal
+
+from financial.models import Expense
+from commercial.models import MonthlyCommercialSummary
+from common.models import BusinessDistrict
+
+class FinancialAllBusinessDistrictsView(APIView):
+    def get(self, request):
+        year = int(request.GET.get("year"))
+        month = int(request.GET.get("month"))
+        state_name = request.GET.get("state")
+
+        if not state_name:
+            return Response({"error": "state is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            state = State.objects.get(name__iexact=state_name)
+        except State.DoesNotExist:
+            return Response({"error": "State not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        target_month = date(year, month, 1)
+        results = []
+
+        districts = BusinessDistrict.objects.filter(state=state)
+
+        for district in districts:
+            # Total Cost (Expense model)
+            cost = Expense.objects.filter(
+                district=district,
+                date__year=year,
+                date__month=month
+            ).aggregate(total_cost=Sum("credit"))["total_cost"] or Decimal("0")
+
+            # Get all sales reps mapped to district via feeder
+            sales_reps = SalesRepresentative.objects.filter(
+                assigned_transformers__feeder__business_district=district
+            ).distinct()
+
+            commercial_data = MonthlyCommercialSummary.objects.filter(
+                month=target_month,
+                sales_rep__in=sales_reps
+            ).aggregate(
+                revenue_billed=Sum("revenue_billed"),
+                collections=Sum("revenue_collected")
+            )
+
+            billed = commercial_data["revenue_billed"] or Decimal("0")
+            collected = commercial_data["collections"] or Decimal("0")
+
+            # Random Tariff Loss (simulate)
+            tariff_loss = Decimal(random.randint(10, 50))
+
+            results.append({
+                "district": district.name,
+                "total_cost": round(cost, 2),
+                "revenue_billed": round(billed, 2),
+                "collections": round(collected, 2),
+                "tariff_loss": f"{tariff_loss}"
+            })
+
+        return Response(results, status=status.HTTP_200_OK)
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from datetime import date
+from django.db.models import Sum
+from decimal import Decimal
+from random import randint
+
+from common.models import Band, Feeder
+from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+from financial.models import Expense
+from technical.models import EnergyDelivered
+
+
+class FinancialServiceBandMetricsView(APIView):
+    def get(self, request):
+        try:
+            year = int(request.GET.get("year"))
+            month = int(request.GET.get("month"))
+        except (TypeError, ValueError):
+            return Response({"error": "Invalid or missing 'year' or 'month' parameters."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        state_name = request.GET.get("state")
+        selected_date = date(year, month, 1)
+
+        bands = Band.objects.all()
+        results = []
+
+        for band in bands:
+            # Get feeders for the band (filtered by state if provided)
+            feeders = Feeder.objects.filter(band=band)
+            if state_name:
+                feeders = feeders.filter(business_district__state__name__iexact=state_name)
+
+            if not feeders.exists():
+                continue
+
+            # Get distinct business districts tied to the feeders
+            district_ids = feeders.values_list("business_district_id", flat=True).distinct()
+
+            # Get all sales reps tied to feeders via transformers
+            sales_reps = SalesRepresentative.objects.filter(
+                assigned_transformers__feeder__in=feeders
+            ).distinct()
+
+            # Aggregate commercial revenue & collections
+            commercial = MonthlyCommercialSummary.objects.filter(
+                sales_rep__in=sales_reps,
+                month=selected_date
+            ).aggregate(
+                revenue_billed=Sum("revenue_billed"),
+                revenue_collected=Sum("revenue_collected")
+            )
+
+            revenue_billed = commercial["revenue_billed"] or Decimal("0")
+            revenue_collected = commercial["revenue_collected"] or Decimal("0")
+
+            # Aggregate total cost from expenses (filter by business districts)
+            total_cost = Expense.objects.filter(
+                district__in=district_ids,
+                date__year=year,
+                date__month=month
+            ).aggregate(total=Sum("credit"))["total"] or Decimal("0")
+
+            # Aggregate energy delivered
+            energy_delivered = EnergyDelivered.objects.filter(
+                feeder__in=feeders,
+                date__year=year,
+                date__month=month
+            ).aggregate(total_energy=Sum("energy_mwh"))["total_energy"] or Decimal("0")
+
+            # Tariff Calculations
+            myto_tariff = Decimal(randint(55, 65))  # Static/random per band
+            actual_tariff = (
+                round(revenue_collected / energy_delivered, 2)
+                if energy_delivered else Decimal("0")
+            )
+            tariff_loss = round(myto_tariff - actual_tariff, 2)
+
+            results.append({
+                "band": band.name,
+                "total_cost": round(total_cost, 2),
+                "revenue_billed": round(revenue_billed, 2),
+                "collections": round(revenue_collected, 2),
+                "myto_allowed_tariff": f"{myto_tariff}",
+                "actual_tariff_collected": f"{actual_tariff}",
+                "tariff_loss": f"{tariff_loss}"
+            })
+
+        return Response(results, status=status.HTTP_200_OK)
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.db.models import Sum
+from datetime import date, timedelta
+from commercial.models import MonthlyCommercialSummary
+
+
+class DailyCollectionsByMonthView(APIView):
+    def get(self, request):
+        try:
+            year = int(request.GET.get("year"))
+            month = int(request.GET.get("month"))
+            start_date = date(year, month, 1)
+        except (TypeError, ValueError):
+            return Response({"error": "Valid 'year' and 'month' query parameters are required."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Get last day of the month
+        next_month = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end_date = next_month - timedelta(days=1)
+
+        results = []
+
+        current_day = start_date
+        while current_day <= end_date:
+            total_collections = MonthlyCommercialSummary.objects.filter(
+                month=current_day
+            ).aggregate(
+                total=Sum("revenue_collected")
+            )["total"] or 0
+
+            results.append({
+                "day": current_day.day,
+                "value": round(total_collections, 2)
+            })
+
+            current_day += timedelta(days=1)
+
+        return Response(results, status=status.HTTP_200_OK)

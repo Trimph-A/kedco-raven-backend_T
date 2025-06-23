@@ -37,15 +37,15 @@ class Command(BaseCommand):
             # self.import_districts(conn)
             # self.import_injection_stations(conn)
             # self.import_feeders(conn)
-            self.import_feeder_interruptions(conn)
-            # self.import_gl_breakdowns(conn)
-            # self.import_expenses(conn)
+            # self.import_feeder_interruptions(conn)
+            # self.import_expenses_with_breakdowns(conn)
             # self.import_hourly_load(conn)
             # self.import_staff(conn)
+            # self.import_distribution_transformers(conn)
             # self.import_sales_reps(conn)
             # self.import_daily_collections(conn)
             # self.import_energy_delivered(conn)
-            # self.import_monthly_commercial_summary(conn)
+            self.import_monthly_commercial_summary(conn)
 
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
@@ -96,8 +96,8 @@ class Command(BaseCommand):
                 slug = row["injection_station_id"].strip()
 
                 # Skip if we've already imported a substation with this name
-                if name.lower() in imported_names:
-                    continue
+                # if name.lower() in imported_names:
+                #     continue
 
                 _, created = InjectionSubstation.objects.get_or_create(
                     slug=slug,
@@ -123,6 +123,7 @@ class Command(BaseCommand):
                 SELECT feeder_id, feeder_name, injection_station_id, district_id, feeder_type, service_band
                 FROM feeders
             """)
+
             for row in cursor.fetchall():
                 name = row["feeder_name"].strip()
                 slug = row["feeder_id"].strip()
@@ -132,13 +133,16 @@ class Command(BaseCommand):
                 substation = InjectionSubstation.objects.filter(slug=row["injection_station_id"].strip()).first()
                 district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
 
-                # Get or create the Band instance
-                band_name = (row.get("service_band") or "").strip().upper()
-                band = Band.objects.filter(name=band_name).first()
-                if not band and band_name:
-                    band = Band.objects.create(name=band_name)
+                # Handle band: skip if NULL or 'NAN'
+                raw_band = row.get("service_band")
+                band_name = (raw_band or "").strip().upper()
+                band = None
+                if band_name and band_name != "NAN":
+                    band = Band.objects.filter(name=band_name).first()
+                    if not band:
+                        band = Band.objects.create(name=band_name)
 
-                if substation and district and band:
+                if substation and district:
                     _, created = Feeder.objects.get_or_create(
                         slug=slug,
                         defaults={
@@ -146,7 +150,7 @@ class Command(BaseCommand):
                             "substation": substation,
                             "voltage_level": voltage_level,
                             "business_district": district,
-                            "band": band,
+                            "band": band,  # Will be None if not found or invalid
                         }
                     )
                     count += int(created)
@@ -156,110 +160,140 @@ class Command(BaseCommand):
 
 
 
-    def import_gl_breakdowns(self, conn):
-        self.stdout.write(self.style.HTTP_INFO("\nImporting GL Breakdowns..."))
-        count = 0
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT DISTINCT `GL Account opex break down` FROM financialopex")
-            for row in cursor.fetchall():
-                name = row["GL Account opex break down"]
-                if name:
-                    _, created = GLBreakdown.objects.get_or_create(name=name.strip())
-                    count += int(created)
-        self.stdout.write(self.style.SUCCESS(f"GL Breakdowns imported: {count} new entries."))
+    def import_expenses_with_breakdowns(self, conn):
+        self.stdout.write(self.style.HTTP_INFO("\nImporting GL Breakdowns and Expenses..."))
 
+        expense_count = 0
+        breakdown_created = 0
+        skipped_rows = []
 
-    def import_expenses(self, conn):
-        self.stdout.write(self.style.HTTP_INFO("\nImporting Expenses..."))
-        count = 0
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT district_id, date, `Purpose of transaction`, `Payment to`, 
-                       Debit, Credit, `GL Account code number`, `GL Account opex break down`, `opex categorization`
+                SELECT district_id, date, purpose_of_transaction, payment_to, 
+                       debit, credit, gl_account_code_number, 
+                       gl_account_opex_break_down, opex_categorization
                 FROM financialopex
             """)
-            for row in cursor.fetchall():
-                district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
+
+            rows = cursor.fetchall()
+
+            for index, row in enumerate(tqdm(rows, desc="Processing Expenses", unit="row")):
+                district_slug = (row.get("district_id") or "").strip()
+                breakdown_name = (row.get("gl_account_opex_break_down") or "").strip()
+                category_name = (row.get("opex_categorization") or "").strip()
+
+                # Validate district
+                district = BusinessDistrict.objects.filter(slug=district_slug).first()
                 if not district:
-                    self.stdout.write(self.style.WARNING(f"Skipping expense — unknown district {row['district_id']}"))
+                    skipped_rows.append({
+                        "reason": "Unknown district",
+                        "district_id": district_slug,
+                        "row_index": index
+                    })
                     continue
 
-                category, _ = ExpenseCategory.objects.get_or_create(name=row["opex categorization"].strip())
-                breakdown = GLBreakdown.objects.filter(name=row["GL Account opex break down"].strip()).first()
-                
-
-                if breakdown:
-                    Expense.objects.create(
-                        district=district,
-                        date=parse_date(str(row["date"])),
-                        purpose=parse_nullable(row["Purpose of transaction"], 'N/A'),
-                        payee=parse_nullable(row["Payment to"], "N/A"),
-                        debit=parse_nullable(row["Debit"], 0.0),
-                        credit=parse_nullable(row["Credit"], 0.0),
-                        gl_account_number=str(row["GL Account code number"]).strip(),
-                        gl_breakdown=breakdown,
-                        opex_category=category
-                    )
-
-                if not breakdown:
-                    self.stdout.write(self.style.WARNING(f"Skipping expense — unknown GL breakdown"))
+                # Validate breakdown
+                if not breakdown_name:
+                    skipped_rows.append({
+                        "reason": "Missing GL Breakdown",
+                        "district_id": district_slug,
+                        "row_index": index
+                    })
                     continue
-        self.stdout.write(self.style.SUCCESS(f"Expenses imported: {count} entries."))
 
+                # Get or create breakdown
+                breakdown, was_created = GLBreakdown.objects.get_or_create(name=breakdown_name)
+                if was_created:
+                    breakdown_created += 1
+
+                # Get or create category
+                category, _ = ExpenseCategory.objects.get_or_create(name=category_name or "Uncategorized")
+
+                # Create Expense
+                Expense.objects.create(
+                    district=district,
+                    date=parse_date(str(row["date"])),
+                    purpose=parse_nullable(row.get("purpose_of_transaction"), "N/A").strip(),
+                    payee=parse_nullable(row.get("payment_to"), "N/A").strip(),
+                    debit=parse_nullable(row.get("debit"), 0.0),
+                    credit=parse_nullable(row.get("credit"), 0.0),
+                    gl_account_number=str(row.get("gl_account_code_number") or "").strip(),
+                    gl_breakdown=breakdown,
+                    opex_category=category,
+                )
+                expense_count += 1
+
+        # Final summaries
+        self.stdout.write(self.style.SUCCESS(f"\nExpenses imported: {expense_count}"))
+        self.stdout.write(self.style.SUCCESS(f"GL Breakdowns created: {breakdown_created}"))
+        self.stdout.write(self.style.WARNING(f"Skipped: {len(skipped_rows)} rows"))
+
+        if skipped_rows:
+            self.stdout.write(self.style.NOTICE("\nSkipped row log:"))
+            for item in skipped_rows:
+                self.stdout.write(f"  - Row {item['row_index']}: {item['reason']} (district_id={item['district_id']})")
 
 
 
     def import_hourly_load(self, conn):
-        self.stdout.write(self.style.HTTP_INFO("\nImporting Hourly Load Data (chunked by date)..."))
+        from collections import defaultdict
+        from django.db import transaction
+
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Hourly Load Data (optimized)..."))
+
         count = 0
+        skipped_rows = []
         interruptions_created = 0
-        skipped = 0
+        batch_size = 1000
+        load_batch = []
+        interruption_batch = []
+
+        # Preload all feeders to avoid repeated queries
+        feeder_map = {f.slug: f for f in Feeder.objects.all()}
 
         with conn.cursor() as cursor:
-            # Get date range
-            cursor.execute("SELECT MIN(reading_date), MAX(reading_date) FROM hourly_load")
+            cursor.execute("SELECT MIN(Date) AS min_date, MAX(Date) AS max_date FROM Technicalhourlydata")
             result = cursor.fetchone()
-            start_date, end_date = result
+            start_date = result["min_date"]
+            end_date = result["max_date"]
 
             if not start_date or not end_date:
-                self.stdout.write(self.style.WARNING("⚠️ No data found in hourly_load table."))
+                self.stdout.write(self.style.WARNING("No data found in Technicalhourlydata table."))
                 return
+            
+            self.stdout.write(self.style.HTTP_INFO(f"  → Date range: {start_date} to {end_date}"))
 
             current = start_date
             while current <= end_date:
-                next_day = current + timedelta(days=1)
-
                 self.stdout.write(self.style.HTTP_INFO(f"→ Importing for {current}"))
 
                 cursor.execute("""
-                    SELECT feeder_id, reading_date, reading_hour, load_mw
-                    FROM hourly_load
-                    WHERE reading_date >= %s AND reading_date < %s
-                """, (current, next_day))
-
+                    SELECT feeder_id, Date, Hour_d, `LoadS`
+                    FROM Technicalhourlydata
+                    WHERE DATE(Date) = %s
+                """, (current,))
                 rows = cursor.fetchall()
 
-                for feeder_id, reading_date, reading_hour, load_raw in rows:
-                    feeder_slug = (feeder_id or "").strip()
-                    feeder = Feeder.objects.filter(slug=feeder_slug).first()
+                self.stdout.write(self.style.HTTP_INFO(f"  → Rows returned: {len(rows)}"))
+
+                for i, row in enumerate(tqdm(rows, desc=f"  Processing {current}", unit="rows")):
+                    feeder_slug = (row.get("feeder_id") or "").strip()
+                    feeder = feeder_map.get(feeder_slug)
 
                     if not feeder:
-                        self.stdout.write(self.style.WARNING(f"Feeder not found: {feeder_slug}"))
-                        skipped += 1
+                        skipped_rows.append({"reason": "Unknown feeder", "feeder_id": feeder_slug})
                         continue
 
-                    try:
-                        parsed_date = parse_date(str(reading_date))
-                        if not parsed_date or reading_hour is None:
-                            raise ValueError
-                    except Exception:
-                        self.stdout.write(self.style.WARNING(
-                            f"Invalid date/hour for feeder {feeder_slug}: {reading_date}, {reading_hour}"
-                        ))
-                        skipped += 1
+                    parsed_date = parse_date(str(row["Date"]))
+                    reading_hour = row["Hour_d"]
+
+                    if parsed_date is None or reading_hour is None:
+                        skipped_rows.append({"reason": "Invalid date/hour", "feeder_id": feeder_slug})
                         continue
 
+                    load_raw = row["LoadS"]
                     load_str = str(load_raw).strip() if load_raw is not None else ""
+
                     try:
                         load_value = float(load_str)
                         load_flag = None
@@ -268,42 +302,60 @@ class Command(BaseCommand):
                         load_flag = load_str.upper()
 
                     if load_value is not None:
-                        HourlyLoad.objects.update_or_create(
+                        load_batch.append(HourlyLoad(
                             feeder=feeder,
                             date=parsed_date,
                             hour=reading_hour,
-                            defaults={"load_mw": load_value}
-                        )
+                            load_mw=load_value
+                        ))
                         count += 1
                     elif load_flag:
                         occurred_at = datetime.combine(parsed_date, time(hour=reading_hour))
                         if settings.USE_TZ:
                             occurred_at = make_aware(occurred_at)
 
-                        obj, created = FeederInterruption.objects.get_or_create(
+                        interruption_batch.append(FeederInterruption(
                             feeder=feeder,
                             occurred_at=occurred_at,
                             interruption_type=load_flag,
-                            defaults={"description": "Logged from hourly load record"}
-                        )
-                        if created:
-                            interruptions_created += 1
-                    else:
-                        self.stdout.write(self.style.WARNING(
-                            f"Skipped: Empty or invalid load for feeder {feeder_slug} at {parsed_date} {reading_hour}"
+                            description="Logged from hourly load record"
                         ))
-                        skipped += 1
+                        interruptions_created += 1
+                    else:
+                        skipped_rows.append({"reason": "Empty or invalid load", "feeder_id": feeder_slug})
 
-                current = next_day
+                    # Flush batch
+                    if len(load_batch) >= batch_size:
+                        HourlyLoad.objects.bulk_create(load_batch, ignore_conflicts=True)
+                        load_batch.clear()
 
-        self.stdout.write(self.style.SUCCESS(f"Hourly loads imported: {count}"))
+                # After each day, flush
+                if load_batch:
+                    HourlyLoad.objects.bulk_create(load_batch, ignore_conflicts=True)
+                    load_batch.clear()
+
+                if interruption_batch:
+                    FeederInterruption.objects.bulk_create(interruption_batch, ignore_conflicts=True)
+                    interruption_batch.clear()
+
+                current += timedelta(days=1)
+
+        # Final logs
+        self.stdout.write(self.style.SUCCESS(f"\nHourly loads imported: {count}"))
         self.stdout.write(self.style.SUCCESS(f"Interruption events created: {interruptions_created}"))
-        self.stdout.write(self.style.WARNING(f"Skipped rows: {skipped}"))
+        self.stdout.write(self.style.WARNING(f"Skipped rows: {len(skipped_rows)}"))
+        
+        if skipped_rows:
+            self.stdout.write(self.style.NOTICE("\nSkipped row log (first 10 shown):"))
+            for row in skipped_rows[:10]:
+                self.stdout.write(f"  - {row['reason']} for feeder {row['feeder_id']}")
 
 
 
     def import_staff(self, conn):
+        from tqdm import tqdm # type: ignore
         self.stdout.write(self.style.HTTP_INFO("\nImporting HR Staff..."))
+
         count = 0
         previous_hire_date = None
         previous_birth_date = None
@@ -314,58 +366,79 @@ class Command(BaseCommand):
                        start_date, end_date, Department, grade, age
                 FROM hr_staff
             """)
-            for row in cursor.fetchall():
-                district = BusinessDistrict.objects.filter(slug=row["district_id"].strip()).first()
-                dept_name = row["Department"].strip()
-                grade_name = row["grade"].strip()
+            rows = cursor.fetchall()
 
-                slug = slugify(dept_name)
-                department, _ = Department.objects.get_or_create(
-                    slug=slug,
-                    defaults={"name": dept_name}
-                )
+            for idx, row in enumerate(tqdm(rows, desc="Processing Staff Records", unit="staff")):
+                try:
+                    district_slug = (row["district_id"] or "").strip()
+                    district = BusinessDistrict.objects.filter(slug=district_slug).first()
+                    if not district:
+                        self.stdout.write(self.style.WARNING(
+                            f"Row {idx}: Skipping — unknown district '{district_slug}'"
+                        ))
+                        continue
 
-                role_slug = slugify(grade_name)
-                role, _ = Role.objects.get_or_create(
-                    slug=role_slug,
-                    defaults={"title": grade_name, "department": department}
-                )
+                    dept_name = (row["Department"] or "").strip()
+                    grade_name = (row["grade"] or "").strip()
 
-                raw_hire_date = row.get("start_date")
-                hire_date = parse_date(str(raw_hire_date)) if raw_hire_date else previous_hire_date
-                if hire_date:
-                    previous_hire_date = hire_date
-                else:
-                    self.stdout.write(self.style.WARNING(
-                        f"Staff {row['name'].strip()} skipped: no valid hire date and no fallback available."))
-                    continue
+                    # Create or get Department
+                    dept_slug = slugify(dept_name)
+                    department, _ = Department.objects.get_or_create(
+                        slug=dept_slug,
+                        defaults={"name": dept_name}
+                    )
 
-                raw_age = row.get("age")
-                if raw_age and isinstance(raw_age, (int, float)):
-                    birth_date = date.today() - timedelta(days=round(float(raw_age) * 365.25))
-                    previous_birth_date = birth_date
-                elif previous_birth_date:
-                    birth_date = previous_birth_date
-                else:
-                    birth_date = date.today() - timedelta(days=30 * 365)
+                    # Create or get Role
+                    role_slug = slugify(grade_name)
+                    role, _ = Role.objects.get_or_create(
+                        slug=role_slug,
+                        defaults={"title": grade_name, "department": department}
+                    )
 
-                Staff.objects.create(
-                    full_name=row["name"].strip(),
-                    email=parse_nullable(row["email"]),
-                    phone_number=parse_nullable(row["phone_number"], "N/A"),
-                    gender=row["gender"],
-                    birth_date=birth_date,
-                    salary=parse_nullable(row["salary"], 0),
-                    hire_date=hire_date,
-                    exit_date=parse_date(str(row["end_date"])) if row["end_date"] else None,
-                    grade=grade_name,
-                    role=role,
-                    department=department,
-                    district=district,
-                    state=district.state if district else None
-                )
-                count += 1
-        self.stdout.write(self.style.SUCCESS(f"Staff imported: {count} entries."))
+                    raw_hire_date = row.get("start_date")
+                    hire_date = parse_date(str(raw_hire_date)) if raw_hire_date else previous_hire_date
+                    if hire_date:
+                        previous_hire_date = hire_date
+                    else:
+                        self.stdout.write(self.style.WARNING(
+                            f"Row {idx}: Skipping staff '{row['name'].strip()}' — no valid hire date."
+                        ))
+                        continue
+
+                    raw_age = row.get("age")
+                    if raw_age and isinstance(raw_age, (int, float)):
+                        birth_date = date.today() - timedelta(days=round(float(raw_age) * 365.25))
+                        previous_birth_date = birth_date
+                    elif previous_birth_date:
+                        birth_date = previous_birth_date
+                    else:
+                        birth_date = date.today() - timedelta(days=30 * 365)
+
+                    Staff.objects.create(
+                        full_name=row["name"].strip(),
+                        email=parse_nullable(row.get("email")),
+                        phone_number=parse_nullable(row.get("phone_number"), "N/A"),
+                        gender=row.get("gender"),
+                        birth_date=birth_date,
+                        salary=parse_nullable(row.get("salary"), 0),
+                        hire_date=hire_date,
+                        exit_date=parse_date(str(row.get("end_date"))) if row.get("end_date") else None,
+                        grade=grade_name,
+                        role=role,
+                        department=department,
+                        district=district,
+                        state=district.state if district else None
+                    )
+                    count += 1
+
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(
+                        f"Row {idx}: Failed to import staff '{row.get('name', '[No Name]')}'. Error: {e}"
+                    ))
+
+        self.stdout.write(self.style.SUCCESS(f"\nStaff imported: {count} entries."))
+
+
 
 
     def import_feeder_interruptions(self, conn):
@@ -375,6 +448,9 @@ class Command(BaseCommand):
         skipped = 0
 
         FAULT_TYPE_MAP = {
+            "Earth Fault": "E/F",
+            "Overcurrent Fault": "O/C",
+            "Overcurrent & Earth Fault": "O/C & E/F",
             "E/F": "E/F",
             "O/C": "O/C",
             "O/C & E/F": "O/C & E/F",
@@ -382,9 +458,17 @@ class Command(BaseCommand):
             "": "N/A",
         }
 
+        # Fault types to skip completely (lowercase match)
+        SKIP_VALUES = {
+            "fault",
+            "ls",
+            "tcn",
+            "there is nothing here since the feeder was opened on planned outage( check g43 for detail)"
+        }
+
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT feeder_id, date, time_of_occurrence, time_of_restoration,
+                SELECT feeder_id, time_of_occurrence, time_of_restoration,
                        load_interrupted_mw, fault_type, description
                 FROM technicalenergyfault
             """)
@@ -400,18 +484,27 @@ class Command(BaseCommand):
                     skipped += 1
                     continue
 
-                fault_date = row["date"]
-                fault_time = row["time_of_occurrence"]
-                restore_time = row["time_of_restoration"]
+                raw_fault_type = (row.get("fault_type") or "").strip()
+                fault_type_lower = raw_fault_type.lower()
+
+                if fault_type_lower in SKIP_VALUES or len(raw_fault_type) > 100:
+                    self.stdout.write(self.style.WARNING(f"Skipped invalid fault type: '{raw_fault_type}'"))
+                    skipped += 1
+                    continue
+
+                # Map fault type to internal code (or default to "N/A")
+                interruption_type = FAULT_TYPE_MAP.get(raw_fault_type, "N/A")[:50]
+
+                occurred_at = row["time_of_occurrence"]
+                restored_at = row.get("time_of_restoration")
                 description = parse_nullable(row.get("description"), "").strip()
-                interruption_type = FAULT_TYPE_MAP.get(row["fault_type"], row["fault_type"] or "N/A")
                 load_interrupted = row.get("load_interrupted_mw") or 0.0
 
-                # Combine date and time, and make timezone-aware
-                occurred_at = make_aware(datetime.datetime.combine(fault_date, fault_time))
-                restored_at = None
-                if restore_time:
-                    restored_at = make_aware(datetime.datetime.combine(fault_date, restore_time))
+                # Ensure datetimes are timezone-aware
+                if occurred_at and occurred_at.tzinfo is None:
+                    occurred_at = make_aware(occurred_at)
+                if restored_at and restored_at.tzinfo is None:
+                    restored_at = make_aware(restored_at)
 
                 # Avoid duplicates
                 exists = FeederInterruption.objects.filter(
@@ -427,31 +520,95 @@ class Command(BaseCommand):
                         restored_at=restored_at,
                         interruption_type=interruption_type,
                         description=description,
-                        load_interrupted_mw=load_interrupted,
                     )
                     count += 1
 
         self.stdout.write(self.style.SUCCESS(f"\nFeeder interruptions imported: {count} entries."))
-        self.stdout.write(self.style.WARNING(f"Skipped: {skipped} rows (e.g., missing feeder)"))
+        self.stdout.write(self.style.WARNING(f"Skipped: {skipped} rows (e.g., missing feeder or invalid fault type)"))
 
+
+    def import_distribution_transformers(self, conn):
+        from common.models import Feeder, DistributionTransformer
+        from tqdm import tqdm # type: ignore
+
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Distribution Transformers..."))
+
+        count = 0
+        skipped = 0
+        errors = []
+
+        # Preload all feeders into a map {slug: Feeder}
+        feeder_map = {f.slug: f for f in Feeder.objects.all()}
+
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT dt_id, dt_name, feeder_id
+                FROM distribution_channels
+            """)
+            rows = cursor.fetchall()
+
+            for idx, row in enumerate(tqdm(rows, desc="Processing DTs", unit="dt")):
+                try:
+                    dt_slug = (row["dt_id"] or "").strip()
+                    dt_name = (row["dt_name"] or "").strip()
+                    feeder_slug = (row["feeder_id"] or "").strip()
+
+                    if not dt_slug or not dt_name or not feeder_slug:
+                        skipped += 1
+                        continue
+
+                    feeder = feeder_map.get(feeder_slug)
+                    if not feeder:
+                        self.stdout.write(self.style.WARNING(
+                            f"Row {idx}: Skipped — Feeder not found for slug '{feeder_slug}'"
+                        ))
+                        skipped += 1
+                        continue
+
+                    # Create DT only if it doesn't already exist by slug
+                    _, created = DistributionTransformer.objects.get_or_create(
+                        slug=dt_slug,
+                        defaults={
+                            "name": dt_name,
+                            "feeder": feeder
+                        }
+                    )
+                    count += int(created)
+
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(
+                        f"Row {idx}: Error importing DT '{row.get('dt_name', '[No Name]')}' — {e}"
+                    ))
+                    skipped += 1
+                    errors.append((idx, str(e)))
+
+        self.stdout.write(self.style.SUCCESS(f"\nDistribution Transformers imported: {count}"))
+        self.stdout.write(self.style.WARNING(f"Skipped: {skipped} rows"))
+
+        if errors:
+            self.stdout.write(self.style.NOTICE("First 5 errors:"))
+            for idx, err in errors[:5]:
+                self.stdout.write(f"  - Row {idx}: {err}")
 
 
     def import_sales_reps(self, conn):
         from commercial.models import SalesRepresentative
-        from common.models import Feeder
+        from common.models import DistributionTransformer
+        from tqdm import tqdm # type: ignore
 
-        self.stdout.write(self.style.HTTP_INFO("\nImporting Sales Representatives and assigning feeders..."))
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Sales Representatives and assigning transformers..."))
+
         created_count = 0
         linked_count = 0
         skipped = 0
 
         with conn.cursor() as cursor:
-            # We'll process unique sales reps and their feeder links
-            cursor.execute("SELECT DISTINCT sales_rep_id, sales_rep_name FROM sales_rep_feeder_map")
+            # Step 1: Fetch all distinct sales reps
+            cursor.execute("SELECT DISTINCT sale_rep_id, sales_rep_name FROM sales_reps")
             reps = cursor.fetchall()
 
-            for row in reps:
-                slug = parse_nullable(row.get("sales_rep_id"), "").strip()
+            for row in tqdm(reps, desc="Creating Sales Reps", unit="rep"):
+                slug = parse_nullable(row.get("sale_rep_id"), "").strip()
                 name = parse_nullable(row.get("sales_rep_name"), "").strip()
 
                 if not slug or not name:
@@ -464,30 +621,32 @@ class Command(BaseCommand):
                 )
                 created_count += int(created)
 
-            # Now fetch and assign feeders
-            cursor.execute("SELECT sales_rep_id, feeder_id FROM sales_rep_feeder_map")
-            mapping_rows = cursor.fetchall()
+            # Step 2: Assign transformers
+            cursor.execute("SELECT sale_rep_id, dt_id FROM sales_reps")
+            assignments = cursor.fetchall()
 
-            for row in mapping_rows:
-                rep_slug = parse_nullable(row.get("sales_rep_id"), "").strip()
-                feeder_slug = parse_nullable(row.get("feeder_id"), "").strip()
+            for row in tqdm(assignments, desc="Linking Sales Reps to Transformers", unit="link"):
+                rep_slug = parse_nullable(row.get("sale_rep_id"), "").strip()
+                dt_slug = parse_nullable(row.get("dt_id"), "").strip()
 
                 rep = SalesRepresentative.objects.filter(slug=rep_slug).first()
-                feeder = Feeder.objects.filter(slug=feeder_slug).first()
+                transformer = DistributionTransformer.objects.filter(slug=dt_slug).first()
 
-                if not rep or not feeder:
+                if not rep or not transformer:
                     self.stdout.write(self.style.WARNING(
-                        f"Could not assign feeder {feeder_slug} to rep {rep_slug} — missing entity."
+                        f"Could not assign transformer {dt_slug} to rep {rep_slug} — missing entity."
                     ))
                     skipped += 1
                     continue
 
-                rep.assigned_feeders.add(feeder)
+                rep.assigned_transformers.add(transformer)
                 linked_count += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Sales Reps created: {created_count}"))
-        self.stdout.write(self.style.SUCCESS(f"Feeder links established: {linked_count}"))
-        self.stdout.write(self.style.WARNING(f"Feeder-rep links skipped: {skipped}"))
+        # Summary
+        self.stdout.write(self.style.SUCCESS(f"\nSales Reps created: {created_count}"))
+        self.stdout.write(self.style.SUCCESS(f"Transformer links established: {linked_count}"))
+        self.stdout.write(self.style.WARNING(f"Skipped links: {skipped} (missing rep or transformer)"))
+
 
 
     def import_daily_collections(self, conn):
@@ -535,6 +694,7 @@ class Command(BaseCommand):
     def import_energy_delivered(self, conn):
         from technical.models import EnergyDelivered
         from common.models import Feeder
+        from tqdm import tqdm #type: ignore
 
         self.stdout.write(self.style.HTTP_INFO("\nImporting Energy Delivered..."))
         count = 0
@@ -542,24 +702,27 @@ class Command(BaseCommand):
 
         with conn.cursor() as cursor:
             # Get total count for progress bar
-            cursor.execute("SELECT COUNT(*) as total FROM daily_energy_readings")
+            cursor.execute("SELECT COUNT(*) as total FROM techicalenergyreadingdailydta")
             total_rows = cursor.fetchone()['total']
 
             # Fetch all rows
-            cursor.execute("SELECT feeder_id, energy_date, energy_kwh FROM daily_energy_readings")
+            cursor.execute("""
+                SELECT Feeder_id, Date, Energy_Reading
+                FROM techicalenergyreadingdailydta
+            """)
 
             for row in tqdm(cursor.fetchall(), total=total_rows, desc="Importing Energy Readings"):
-                feeder_slug = parse_nullable(row.get("feeder_id"), "").strip()
-                date = row.get("energy_date")
-                mwh = row.get("energy_kwh")  # Already in MWh
+                feeder_slug = parse_nullable(row.get("Feeder_id"), "").strip()
+                date = row.get("Date")
+                energy_raw = row.get("Energy_Reading")
 
                 feeder = Feeder.objects.filter(slug=feeder_slug).first()
-                if not feeder or not date or mwh is None:
+                if not feeder or not date or energy_raw is None:
                     skipped += 1
                     continue
 
                 try:
-                    mwh_value = round(float(mwh), 2)
+                    energy_mwh = round(float(energy_raw), 2)
                 except (ValueError, TypeError):
                     skipped += 1
                     continue
@@ -567,7 +730,7 @@ class Command(BaseCommand):
                 EnergyDelivered.objects.update_or_create(
                     feeder=feeder,
                     date=date,
-                    defaults={"energy_mwh": mwh_value}
+                    defaults={"energy_mwh": energy_mwh}
                 )
                 count += 1
 
@@ -575,19 +738,24 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING(f"Skipped rows: {skipped}"))
 
 
+
     def import_monthly_commercial_summary(self, conn):
         from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+        from tqdm import tqdm #type: ignore
+
         self.stdout.write(self.style.HTTP_INFO("\nImporting Monthly Commercial Summary..."))
         count = 0
         skipped = 0
 
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT sales_rep_id, metric_date, pop, response, billed, collections
-                FROM commercial_metrics
+                SELECT sale_rep_id, date_recorded, pop, response_rate, billed, payment
+                FROM commercial
             """)
-            for row in cursor.fetchall():
-                sales_rep_id = row["sales_rep_id"].strip()
+            rows = cursor.fetchall()
+
+            for row in tqdm(rows, desc="Processing Monthly Commercial Summaries", unit="row"):
+                sales_rep_id = (row.get("sale_rep_id") or "").strip()
                 sales_rep = SalesRepresentative.objects.filter(slug=sales_rep_id).first()
 
                 if not sales_rep:
@@ -597,14 +765,17 @@ class Command(BaseCommand):
 
                 summary, created = MonthlyCommercialSummary.objects.update_or_create(
                     sales_rep=sales_rep,
-                    month=row["metric_date"],
+                    month=row["date_recorded"],
                     defaults={
-                        "customers_billed": row["pop"] or 0,
-                        "customers_responded": row["response"] or 0,
-                        "revenue_billed": row["billed"] or 0,
-                        "revenue_collected": row["collections"] or 0,
+                        "customers_billed": row.get("pop") or 0,
+                        "customers_responded": row.get("response_rate") or 0,
+                        "revenue_billed": row.get("billed") or 0,
+                        "revenue_collected": row.get("payment") or 0,
                     }
                 )
                 count += int(created)
 
-        self.stdout.write(self.style.SUCCESS(f"Monthly Commercial Summary imported: {count} entries. Skipped: {skipped}"))
+        self.stdout.write(self.style.SUCCESS(
+            f"Monthly Commercial Summary imported: {count} entries. Skipped: {skipped}"
+        ))
+

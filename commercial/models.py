@@ -73,9 +73,10 @@ class MonthlyCustomerStats(UUIDModel, models.Model):
     class Meta:
         unique_together = ('feeder', 'month')
 
+
 class SalesRepresentative(UUIDModel, models.Model):
     name = models.CharField(max_length=255)
-    assigned_feeders = models.ManyToManyField(Feeder)
+    assigned_transformers = models.ManyToManyField(DistributionTransformer)
     slug = models.SlugField(unique=True)
 
     def __str__(self):

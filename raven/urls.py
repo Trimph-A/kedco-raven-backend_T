@@ -39,7 +39,9 @@ from commercial.views import (
     commercial_all_business_districts_view,
     feeder_metrics,
     feeder_performance_view,
-    feeders_by_location_view
+    feeders_by_location_view,
+    CustomerBusinessMetricsView,
+    ServiceBandMetricsView
 )
 
 from technical.views import (
@@ -54,7 +56,8 @@ from technical.views import (
     state_technical_summary,
     all_business_districts_technical_summary,
     business_district_technical_summary,
-    FeederAvailabilityOverview
+    FeederAvailabilityOverview,
+    service_band_technical_metrics
 )
 
 from financial.views import (
@@ -67,6 +70,10 @@ from financial.views import (
     sales_rep_performance_view,
     list_sales_reps,
     sales_rep_global_summary_view,
+    FinancialAllStatesView,
+    FinancialAllBusinessDistrictsView,
+    FinancialServiceBandMetricsView,
+    DailyCollectionsByMonthView
 )
 from financial.views import GLBreakdownViewSet
 
@@ -147,11 +154,16 @@ urlpatterns = [
     path('api/metrics/staff-summary/', StaffSummaryView.as_view(), name='staff-summary'),
     path('api/metrics/staff/state-overview/', StaffStateOverviewView.as_view(), name='staff-state-overview'),
     path("api/metrics/staff/state-overview/<slug:slug>/", StaffStateDetailView.as_view(), name="staff-state-detail"),
+
     path('api/metrics/commercial/overview/', CommercialOverviewAPIView.as_view(), name='commercial-overview'),
     path('api/metrics/commercial/all-states/',commercial_all_states_view, name='commercial-all-states-view'),
     path('api/metrics/commercial/state/',commercial_state_metrics_view, name='commercial-state-view'),
     path('api/metrics/commercial/business-districts/',commercial_all_business_districts_view, name='commercial-business-districts-view'),
     path('api/metrics/commercial/feeders/metrics/', feeder_metrics, name='feeder-metrics'),
+    path("api/metrics/commercial/business-metrics/", CustomerBusinessMetricsView.as_view(), name="customer-business-metrics"),
+    path("api/metrics/commercial/service-band-metrics/", ServiceBandMetricsView.as_view(), name="service-band-metrics"),
+
+
 
     path("api/metrics/feeders/performance/", feeder_performance_view, name="feeder-performance"),
     path("api/metrics/feeders/list/", feeders_by_location_view, name="feeders-by-location"),
@@ -161,6 +173,14 @@ urlpatterns = [
     path("api/financial/sales-reps/<uuid:rep_id>/performance/", sales_rep_performance_view),
     path("api/financial/sales-reps/", list_sales_reps),
     path("api/financial/sales-reps/summary/", sales_rep_global_summary_view),
+    path("api/financial/all-states-metrics/", FinancialAllStatesView.as_view(), name="financial-all-states"),
+    path("api/financial/all-business-districts-metrics/", FinancialAllBusinessDistrictsView.as_view(), name="financial-business-districts"),
+    path("api/financial/service-band-financial-metrics/", FinancialServiceBandMetricsView.as_view(), name="service-band-financial"),
+    path("api/financial/daily-collections/", DailyCollectionsByMonthView.as_view(), name="daily-collections"),
+
+
+
+
 
     path('api/technical/overview/', technical_overview_view, name='technical-overview'),
     path('api/technical/overview/all-states/', all_states_technical_summary, name='all-states-technical-summary'),
@@ -168,6 +188,8 @@ urlpatterns = [
     path('api/technical/overview/business-districts/', all_business_districts_technical_summary, name='business-districts-technical-summary'),
     path('api/technical/overview/business-district/', business_district_technical_summary, name='business-district-technical-summary'),
     path('api/technical/availability-overview/', FeederAvailabilityOverview.as_view(), name='feeder-availability-overview'),
+    path('api/technical/service-band-technical-metrics/', service_band_technical_metrics, name='service-band-technical-metrics'),
+
 
 
 ]
