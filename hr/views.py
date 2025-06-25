@@ -35,8 +35,11 @@ class StaffViewSet(viewsets.ModelViewSet):
     queryset = Staff.objects.all()
     serializer_class = StaffSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter]
+    # filterset_fields = [
+    #     'department', 'role', 'state', 'district', 'gender', 'grade', 'is_active'
+    # ]
     filterset_fields = [
-        'department', 'role', 'state', 'district', 'gender', 'grade', 'is_active'
+        'department', 'role', 'state', 'district', 'gender', 'grade',
     ]
     search_fields = ['full_name', 'email', 'phone_number']
 

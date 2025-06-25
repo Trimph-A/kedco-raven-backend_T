@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
     'common',
     'commercial',
     'financial',
@@ -160,3 +161,8 @@ SPECTACULAR_SETTINGS = {
     'TITLE': 'Raven API',
     'VERSION': '1.0.0',
 }
+
+
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = ['http://localhost:8000', 'http://31.97.56.29']
+
