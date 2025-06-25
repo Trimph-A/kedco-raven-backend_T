@@ -24,14 +24,46 @@ class HourlyLoad(UUIDModel, models.Model):
 
 class FeederInterruption(UUIDModel, models.Model):
     INTERRUPTION_TYPES = [
-        ("E/F", "Earth Fault"),
-        ("O/C", "Overcurrent"),
-        ("O/C & E/F", "Overcurrent and Earth Fault"),
-        ("NO RI", "No RI"),
-        ("N/A", "Not Specified"),
-    ]
+    ("E/F", "Earth Fault"),
+    ("O/C", "Overcurrent"),
+    ("O/C & E/F", "Overcurrent and Earth Fault"),
+    ("NO RI", "No RI"),
+    ("N/A", "Not Specified"),
+    ("L/S", "Load Shedding (L/S)"),
+    ("O/S", "Overload/Overcurrent (O/S)"),
+    ("T/F", "Transformer Fault (T/F)"),
+    ("B/F", "Bus/Breakdown Fault (B/F)"),
+    ("O/N", "Overheating/Overtemp (O/N)"),
+    ("O/E", "Open Earth (O/E)"),
+    ("P/O", "Phase Open (P/O)"),
+    ("O/F", "Over Frequency (O/F)"),
+    ("P/M", "Phase Missing/Phase Metering (P/M)"),
+    ("O", "Other Faults/Operational Fault (O)"),
+    ("T/S", "Trip/Surge Fault (T/S)"),
+    ("L/S GS", "Load Shedding – General Supply (L/S GS)"),
+    ("MTNC", "Maintenance (MTNC)"),
+    ("OC & E/F", "Open Circuit & Earth Fault (OC & E/F)"),
+    ("EM/D", "Emergency/Device (EM/D)"),
+    ("330KV L/F", "330 kV Line Fault (330KV L/F)"),
+    ("OFF", "Switch Off/Feeder Off (OFF)"),
+    ("S/C", "Short Circuit (S/C)"),
+    ("132KV E/F", "132 kV Earth Fault (132KV E/F)"),
+    ("132KV L/F", "132 kV Line Fault (132KV L/F)"),
+    ("330KV L/S", "330 kV Line Shelving/Load Shedding (330KV L/S)"),
+    ("132KV CB/F", "132 kV Circuit Breaker Failure (132KV CB/F)"),
+    ("D/C", "Double Circuit/Direct Current (D/C)"),
+    ("MTCE", "Maintenance (MTCE)"),
+    ("IN O/C", "Incoming Over Current/Infeeder OC (IN O/C)"),
+    ("T/LS", "Thermal Load Shedding (T/LS)"),
+    ("132KV MTCE", "132 kV Maintenance (132KV MTCE)"),
+    ("LIM", "Lightning Impulse/Limit (LIM)"),
+    ("tcn", "(tcn)"),
+    ("fault", "Fault"),
+    ("permit", "Permit"),
+]
+
     feeder = models.ForeignKey(Feeder, on_delete=models.CASCADE)
-    interruption_type = models.CharField(max_length=50, choices=INTERRUPTION_TYPES)
+    interruption_type = models.CharField(max_length=100, choices=INTERRUPTION_TYPES)
     description = models.TextField(blank=True, null=True)
     occurred_at = models.DateTimeField()
     restored_at = models.DateTimeField(blank=True, null=True)
