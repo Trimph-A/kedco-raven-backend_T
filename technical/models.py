@@ -73,7 +73,9 @@ class FeederInterruption(UUIDModel, models.Model):
 
     @property
     def duration_hours(self):
-        return (self.restored_at - self.occurred_at).total_seconds() / 3600
+        if self.restored_at and self.occurred_at:
+            return (self.restored_at - self.occurred_at).total_seconds() / 3600
+        return 0
 
 
 class DailyHoursOfSupply(UUIDModel, models.Model):
