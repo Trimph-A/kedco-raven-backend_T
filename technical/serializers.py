@@ -2,6 +2,11 @@ from rest_framework import serializers
 from .models import *
 
 class EnergyDeliveredSerializer(serializers.ModelSerializer):
+    feeder = serializers.SlugRelatedField(
+        queryset=Feeder.objects.all(),
+        slug_field='slug'
+    )
+
     class Meta:
         model = EnergyDelivered
         fields = '__all__'
@@ -12,7 +17,7 @@ class HourlyLoadSerializer(serializers.ModelSerializer):
         queryset=Feeder.objects.all(),
         slug_field='slug'
     )
-    
+
     class Meta:
         model = HourlyLoad
         fields = '__all__'
@@ -32,6 +37,11 @@ class FeederInterruptionSerializer(serializers.ModelSerializer):
 
 
 class DailyHoursOfSupplySerializer(serializers.ModelSerializer):
+    feeder = serializers.SlugRelatedField(
+        queryset=Feeder.objects.all(),
+        slug_field='slug'
+    )
+    
     class Meta:
         model = DailyHoursOfSupply
         fields = '__all__'
