@@ -14,6 +14,10 @@ from technical.metrics import (
 from django.db.models.functions import TruncMonth
 from commercial.utils import get_filtered_feeders
 from django.db.models import Avg
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework import status
+from django.shortcuts import get_object_or_404
 
 
 
@@ -73,6 +77,37 @@ class FeederInterruptionViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    @action(detail=False, methods=['get', 'patch', 'put', 'delete', 'post'], url_path='feeder/(?P<slug>[^/.]+)')
+    def handle_by_feeder_slug(self, request, slug=None):
+        if request.method == 'GET':
+            interruption = get_object_or_404(FeederInterruption, feeder__slug=slug)
+            serializer = self.get_serializer(interruption)
+            return Response(serializer.data)
+
+        elif request.method in ['PATCH', 'PUT']:
+            interruption = get_object_or_404(FeederInterruption, feeder__slug=slug)
+            partial = request.method == 'PATCH'
+            serializer = self.get_serializer(interruption, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+
+        elif request.method == 'DELETE':
+            interruption = get_object_or_404(FeederInterruption, feeder__slug=slug)
+            interruption.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        elif request.method == 'POST':
+            # Create new interruption for a given feeder slug
+            # You’ll need to resolve the feeder instance from the slug
+            feeder = get_object_or_404(Feeder, slug=slug)
+            data = request.data.copy()
+            data['feeder'] = feeder.pk  # replace slug with ID
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
 
 class DailyHoursOfSupplyViewSet(viewsets.ModelViewSet):
     serializer_class = DailyHoursOfSupplySerializer
