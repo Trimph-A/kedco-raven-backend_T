@@ -113,7 +113,7 @@ router.register(r'monthly-customer-stats', MonthlyCustomerStatsViewSet, basename
 
 router.register(r'technical/energy-delivered', EnergyDeliveredViewSet, basename='energy-delivered')
 router.register(r'technical/hourly-load', HourlyLoadViewSet, basename='hourly-load')
-router.register(r'technical/interruptions', FeederInterruptionViewSet, basename='interruption')
+router.register(r'technical/feeder-interruptions', FeederInterruptionViewSet, basename='interruption')
 router.register(r'technical/hours-of-supply', DailyHoursOfSupplyViewSet, basename='hours-of-supply')
 
 

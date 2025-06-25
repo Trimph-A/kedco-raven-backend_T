@@ -33,10 +33,10 @@ class Command(BaseCommand):
         )
 
         with conn:
-            # self.import_states(conn)
-            # self.import_districts(conn)
-            # self.import_injection_stations(conn)
-            # self.import_feeders(conn)
+            self.import_states(conn)
+            self.import_districts(conn)
+            self.import_injection_stations(conn)
+            self.import_feeders(conn)
             # self.import_feeder_interruptions(conn)
             # self.import_expenses_with_breakdowns(conn)
             # self.import_hourly_load(conn)
@@ -45,7 +45,7 @@ class Command(BaseCommand):
             # self.import_sales_reps(conn)
             # self.import_daily_collections(conn)
             # self.import_energy_delivered(conn)
-            self.import_monthly_commercial_summary(conn)
+            # self.import_monthly_commercial_summary(conn)
 
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))

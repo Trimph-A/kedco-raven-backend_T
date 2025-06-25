@@ -8,6 +8,11 @@ class EnergyDeliveredSerializer(serializers.ModelSerializer):
 
 
 class HourlyLoadSerializer(serializers.ModelSerializer):
+    feeder = serializers.SlugRelatedField(
+        queryset=Feeder.objects.all(),
+        slug_field='slug'
+    )
+    
     class Meta:
         model = HourlyLoad
         fields = '__all__'
@@ -15,6 +20,11 @@ class HourlyLoadSerializer(serializers.ModelSerializer):
 
 class FeederInterruptionSerializer(serializers.ModelSerializer):
     duration_hours = serializers.FloatField(read_only=True)
+
+    feeder = serializers.SlugRelatedField(
+        queryset=Feeder.objects.all(),
+        slug_field='slug'
+    )
 
     class Meta:
         model = FeederInterruption
