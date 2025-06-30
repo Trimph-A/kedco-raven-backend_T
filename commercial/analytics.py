@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from dateutil.relativedelta import relativedelta # type: ignore
+from dateutil.relativedelta import relativedelta  # type: ignore
 from django.db.models import Sum
 from django.utils.dateparse import parse_date
 from decimal import Decimal, InvalidOperation
@@ -19,7 +19,6 @@ def get_commercial_overview_data(mode, year, month, from_date, to_date):
 
     months = generate_month_list(selected_date)
 
-    # Data structure
     data = {
         "energy_delivered": [],
         "energy_billed": [],
@@ -78,10 +77,16 @@ def get_commercial_overview_data(mode, year, month, from_date, to_date):
             collection_eff_pct = round(collection_eff * Decimal("100"), 2)
             atcc_pct = round(atcc * Decimal("100"), 2)
 
-            revenue_billed_pc = round(Decimal(revenue_billed) / Decimal(customers_billed), 2) if customers_billed else 0
-            collections_pc = round(Decimal(revenue_collected) / Decimal(customers_billed), 2) if customers_billed else 0
-            response_rate = round(Decimal(customers_responded) / Decimal(customers_billed) * Decimal("100"), 2) if customers_billed else 0
-            response_metric = round(Decimal(customers_responded) / Decimal(customers_billed), 2) if customers_billed else 0
+            revenue_billed_pc = round(Decimal(revenue_billed) / Decimal(customers_billed), 2) if customers_billed else Decimal(0)
+            collections_pc = round(Decimal(revenue_collected) / Decimal(customers_billed), 2) if customers_billed else Decimal(0)
+            response_rate = round(Decimal(customers_responded) / Decimal(customers_billed) * Decimal("100"), 2) if customers_billed else Decimal(0)
+
+            # Updated customer response metric calculation
+            response_metric = (
+                round(collections_pc / revenue_billed_pc, 2)
+                if revenue_billed_pc != 0
+                else Decimal(0)
+            )
 
         except (InvalidOperation, ZeroDivisionError):
             billing_eff_pct = collection_eff_pct = atcc_pct = Decimal(0)
@@ -90,6 +95,7 @@ def get_commercial_overview_data(mode, year, month, from_date, to_date):
         append_with_delta(data["energy_delivered"], energy_delivered, label)
         append_with_delta(data["energy_billed"], energy_billed, label)
         append_with_delta(data["energy_collected"], revenue_collected, label)
+
         data["billing_efficiency"].append({"month": label, "value": float(billing_eff_pct)})
         data["collection_efficiency"].append({"month": label, "value": float(collection_eff_pct)})
         data["atcc"].append({"month": label, "value": float(atcc_pct)})

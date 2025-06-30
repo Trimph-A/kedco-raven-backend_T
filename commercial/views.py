@@ -887,9 +887,82 @@ def feeders_by_location_view(request):
 
     for feeder in feeders:
         metrics = calculate_atcc_metrics(feeder, start_date, end_date)
-        result.append(metrics)
+
+        result.append({
+            "name": feeder.name,
+            "slug": feeder.slug,
+            "voltage_level": feeder.voltage_level,
+            "business_district": {
+                "name": feeder.business_district.name if feeder.business_district else None,
+                "slug": feeder.business_district.slug if feeder.business_district else None,
+            },
+            **metrics  # Unpack and merge the calculated metrics directly into the top-level dict
+        })
 
     return Response(result)
+
+
+
+@api_view(["GET"])
+def transformer_metrics_by_feeder_view(request):
+    feeder_slug = request.GET.get("feeder")
+    if not feeder_slug:
+        return Response({"error": "Missing feeder slug in query parameters"}, status=400)
+
+    try:
+        feeder = Feeder.objects.get(slug=feeder_slug)
+    except Feeder.DoesNotExist:
+        return Response({"error": "Feeder not found"}, status=404)
+
+    transformers = DistributionTransformer.objects.filter(feeder=feeder)
+
+    mode = request.GET.get("mode", "monthly")
+    year = request.GET.get("year")
+    month = request.GET.get("month")
+
+    if mode == "monthly" and year and month:
+        from calendar import monthrange
+        year = int(year)
+        month = int(month)
+        start_day = date(year, month, 1)
+        end_day = date(year, month, monthrange(year, month)[1])
+        date_from, date_to = start_day, end_day
+    else:
+        date_from, date_to = get_date_range_from_request(request, "date")
+
+    result = []
+
+    for transformer in transformers:
+        sales_reps = SalesRepresentative.objects.filter(
+            assigned_transformers=transformer
+        ).distinct()
+
+        summary = MonthlyCommercialSummary.objects.filter(
+            sales_rep__in=sales_reps,
+            month__range=(date_from, date_to)
+        ).aggregate(
+            revenue_billed=Sum("revenue_billed"),
+            revenue_collected=Sum("revenue_collected")
+        )
+
+        revenue_billed = summary["revenue_billed"] or 0
+        revenue_collected = summary["revenue_collected"] or 0
+
+        total_cost = Expense.objects.filter(
+            district=transformer.feeder.business_district,
+            date__range=(date_from, date_to)
+        ).aggregate(total=Sum("credit"))["total"] or 0
+
+        result.append({
+            "name": transformer.name,
+            "slug": transformer.slug,
+            "total_cost": round(total_cost, 2),
+            "revenue_billed": round(revenue_billed, 2),
+            "revenue_collected": round(revenue_collected, 2),
+        })
+
+    return Response(result)
+
 
 
 

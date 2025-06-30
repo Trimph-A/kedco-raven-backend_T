@@ -93,12 +93,14 @@ def get_financial_summary(request):
         "opex_breakdown": list(opex_breakdown)
     }
 
-
 from django.db.models import Sum
-from commercial.models import MonthlyRevenueBilled, DailyRevenueCollected
+from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+from financial.models import Expense
 from common.models import Feeder
+from commercial.date_filters import get_date_range_from_request
 from datetime import date
 from calendar import monthrange
+
 
 def get_financial_feeder_data(request):
     state = request.GET.get("state")
@@ -150,8 +152,15 @@ def get_financial_feeder_data(request):
             date__range=(date_from, date_to)
         ).aggregate(total=Sum("credit"))["total"] or 0
 
+        bd_obj = feeder.business_district
+
         data.append({
             "feeder": feeder.name,
+            "slug": feeder.slug,
+            "business_district": {
+                "name": bd_obj.name if bd_obj else None,
+                "slug": bd_obj.slug if bd_obj else None,
+            },
             "total_cost": round(total_cost, 2),
             "revenue_billed": round(revenue_billed, 2),
             "revenue_collected": round(revenue_collected, 2),

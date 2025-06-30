@@ -41,7 +41,8 @@ from commercial.views import (
     feeder_performance_view,
     feeders_by_location_view,
     CustomerBusinessMetricsView,
-    ServiceBandMetricsView
+    ServiceBandMetricsView,
+    transformer_metrics_by_feeder_view
 )
 
 from technical.views import (
@@ -73,7 +74,8 @@ from financial.views import (
     FinancialAllStatesView,
     FinancialAllBusinessDistrictsView,
     FinancialServiceBandMetricsView,
-    DailyCollectionsByMonthView
+    DailyCollectionsByMonthView,
+    financial_transformer_view
 )
 from financial.views import GLBreakdownViewSet
 
@@ -162,6 +164,9 @@ urlpatterns = [
     path('api/metrics/commercial/feeders/metrics/', feeder_metrics, name='feeder-metrics'),
     path("api/metrics/commercial/business-metrics/", CustomerBusinessMetricsView.as_view(), name="customer-business-metrics"),
     path("api/metrics/commercial/service-band-metrics/", ServiceBandMetricsView.as_view(), name="service-band-metrics"),
+    path("api/metrics/commercial/transformers-metrics/", transformer_metrics_by_feeder_view),
+
+
 
 
 
@@ -177,6 +182,8 @@ urlpatterns = [
     path("api/financial/all-business-districts-metrics/", FinancialAllBusinessDistrictsView.as_view(), name="financial-business-districts"),
     path("api/financial/service-band-financial-metrics/", FinancialServiceBandMetricsView.as_view(), name="service-band-financial"),
     path("api/financial/daily-collections/", DailyCollectionsByMonthView.as_view(), name="daily-collections"),
+    path('api/financial/transformer-metrics/', financial_transformer_view, name='financial-transformer-metrics'),
+
 
 
 
