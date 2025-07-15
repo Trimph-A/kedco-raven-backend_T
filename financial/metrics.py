@@ -8,7 +8,7 @@ def get_total_cost(request):
     feeders = get_filtered_feeders(request)
     month_from, month_to = get_date_range_from_request(request, 'month')
 
-    qs = Expense.objects.filter(feeder__in=feeders) if feeders.exists() else Expense.objects.all()
+    qs = Opex.objects.filter(feeder__in=feeders) if feeders.exists() else Opex.objects.all()
 
     if month_from and month_to:
         qs = qs.filter(month__range=(month_from, month_to))
@@ -41,7 +41,7 @@ def get_opex_breakdown(request):
     feeders = get_filtered_feeders(request)
     month_from, month_to = get_date_range_from_request(request, 'month')
 
-    qs = Expense.objects.filter(feeder__in=feeders) if feeders.exists() else Expense.objects.all()
+    qs = Opex.objects.filter(feeder__in=feeders) if feeders.exists() else Opex.objects.all()
 
     if month_from and month_to:
         qs = qs.filter(month__range=(month_from, month_to))
@@ -72,7 +72,7 @@ def get_financial_summary(request):
     state = request.GET.get('state')
     month_from, month_to = get_date_range_from_request(request, 'month')
 
-    qs = Expense.objects.all()
+    qs = Opex.objects.all()
     if state:
         qs = qs.filter(district__state__slug=state)
     if district:
@@ -95,7 +95,7 @@ def get_financial_summary(request):
 
 from django.db.models import Sum
 from commercial.models import MonthlyCommercialSummary, SalesRepresentative
-from financial.models import Expense
+from financial.models import Opex
 from common.models import Feeder
 from commercial.date_filters import get_date_range_from_request
 from datetime import date
@@ -147,7 +147,7 @@ def get_financial_feeder_data(request):
         revenue_collected = summary["revenue_collected"] or 0
 
         # Aggregate cost from expenses in feeder's business district
-        total_cost = Expense.objects.filter(
+        total_cost = Opex.objects.filter(
             district=feeder.business_district,
             date__range=(date_from, date_to)
         ).aggregate(total=Sum("credit"))["total"] or 0

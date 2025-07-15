@@ -881,3 +881,23 @@ def service_band_technical_metrics(request):
         }
 
     return Response({"results": results})
+
+
+from .metrics import get_transformer_availability_summary
+
+class TransformerAvailabilityOverview(APIView):
+    def get(self, request):
+        feeder_slug = request.GET.get("feeder")
+        month = request.GET.get("month")
+        year = request.GET.get("year")
+        from_date = request.GET.get("from_date")
+        to_date = request.GET.get("to_date")
+
+        data = get_transformer_availability_summary(
+            feeder_slug=feeder_slug,
+            month=month,
+            year=year,
+            from_date=from_date,
+            to_date=to_date,
+        )
+        return Response(data)

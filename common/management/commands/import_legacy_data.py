@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from common.models import State, BusinessDistrict, InjectionSubstation, Feeder, Band
-from financial.models import Expense, ExpenseCategory, GLBreakdown
+from financial.models import Opex, ExpenseCategory, GLBreakdown
 from technical.models import HourlyLoad, FeederInterruption
 from hr.models import Staff, Department, Role
 from django.utils.dateparse import parse_date
@@ -210,7 +210,7 @@ class Command(BaseCommand):
                 category, _ = ExpenseCategory.objects.get_or_create(name=category_name or "Uncategorized")
 
                 # Create Expense
-                Expense.objects.create(
+                Opex.objects.create(
                     district=district,
                     date=parse_date(str(row["date"])),
                     purpose=parse_nullable(row.get("purpose_of_transaction"), "N/A").strip(),

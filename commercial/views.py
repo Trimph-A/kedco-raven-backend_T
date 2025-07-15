@@ -14,7 +14,7 @@ from commercial.metrics import calculate_derived_metrics, get_sales_rep_performa
 from rest_framework.decorators import api_view
 from decimal import Decimal, InvalidOperation
 from technical.models import EnergyDelivered, HourlyLoad, FeederInterruption
-from financial.models import MonthlyRevenueBilled, Expense
+from financial.models import MonthlyRevenueBilled, Opex
 from commercial.models import DailyCollection
 from django.utils.dateparse import parse_date
 from datetime import date
@@ -710,7 +710,7 @@ class OverviewAPIView(APIView):
             billed_energy = MonthlyEnergyBilled.objects.filter(month=m).aggregate(
                 energy=Sum("energy_mwh")
             )
-            cost = Expense.objects.filter(date__year=m.year, date__month=m.month).aggregate(
+            cost = Opex.objects.filter(date__year=m.year, date__month=m.month).aggregate(
                 credit=Sum("credit")
             )
 
@@ -901,7 +901,7 @@ def feeders_by_location_view(request):
 
     return Response(result)
 
-
+from calendar import monthrange
 
 @api_view(["GET"])
 def transformer_metrics_by_feeder_view(request):
@@ -921,7 +921,6 @@ def transformer_metrics_by_feeder_view(request):
     month = request.GET.get("month")
 
     if mode == "monthly" and year and month:
-        from calendar import monthrange
         year = int(year)
         month = int(month)
         start_day = date(year, month, 1)
@@ -945,13 +944,31 @@ def transformer_metrics_by_feeder_view(request):
             revenue_collected=Sum("revenue_collected")
         )
 
-        revenue_billed = summary["revenue_billed"] or 0
-        revenue_collected = summary["revenue_collected"] or 0
+        revenue_billed = Decimal(summary["revenue_billed"] or 0)
+        revenue_collected = Decimal(summary["revenue_collected"] or 0)
 
-        total_cost = Expense.objects.filter(
+        energy_billed = MonthlyEnergyBilled.objects.filter(
+            feeder=feeder,
+            month__range=(date_from, date_to)
+        ).aggregate(energy=Sum("energy_mwh"))["energy"] or 0
+
+        energy_delivered = EnergyDelivered.objects.filter(
+            feeder=feeder,
+            date__range=(date_from, date_to)
+        ).aggregate(energy=Sum("energy_mwh"))["energy"] or 0
+
+        total_cost = Opex.objects.filter(
             district=transformer.feeder.business_district,
             date__range=(date_from, date_to)
         ).aggregate(total=Sum("credit"))["total"] or 0
+
+        # Calculate ATCC
+        try:
+            billing_eff = Decimal(energy_billed) / Decimal(energy_delivered) if energy_delivered else Decimal(0)
+            collection_eff = revenue_collected / revenue_billed if revenue_billed else Decimal(0)
+            atcc = (1 - (billing_eff * collection_eff)) * 100
+        except Exception:
+            atcc = 0
 
         result.append({
             "name": transformer.name,
@@ -959,6 +976,7 @@ def transformer_metrics_by_feeder_view(request):
             "total_cost": round(total_cost, 2),
             "revenue_billed": round(revenue_billed, 2),
             "revenue_collected": round(revenue_collected, 2),
+            "atcc": round(atcc, 2),
         })
 
     return Response(result)
