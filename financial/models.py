@@ -200,7 +200,7 @@ class MYTOTariff(UUIDModel, models.Model):
     band = models.ForeignKey(
         Band,
         on_delete=models.CASCADE,
-        help_text="Service band (A–E)"
+        help_text="Service band (A-E)"
     )
     effective_date = models.DateField(
         help_text="Date this tariff rate took effect"
