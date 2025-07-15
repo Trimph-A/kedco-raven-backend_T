@@ -101,12 +101,25 @@ class DailyCollection(UUIDModel, models.Model):
         ('Postpaid', 'Postpaid'),
     )
 
+    VENDOR_CHOICES = [
+        ('BuyPower.ng', 'BuyPower.ng'),
+        ('Banahim.net', 'Banahim.net'),
+        ('Bank',        'Bank'),
+        ('Cash',        'Cash'),
+        ('POS',         'POS'),
+        ('powershop.ng','powershop.ng'),
+        ('Remita',      'Remita'),
+    ]
+
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
     date = models.DateField()
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     collection_type = models.CharField(max_length=10, choices=COLLECTION_TYPE_CHOICES)
-    vendor_name = models.CharField(max_length=255, blank=True, null=True)
-
+    vendor_name = models.CharField(
+        max_length=20,
+        choices=VENDOR_CHOICES,
+        help_text="Vendor through which collection was made"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
 
