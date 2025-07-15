@@ -130,7 +130,7 @@ class SalaryPayment(UUIDModel, models.Model):
     def __str__(self):
         return (
             f"{self.month:%Y-%m} | "
-            f"{self.staff.get_full_name() if self.staff else 'Unknown Staff'} | "
+            f"{self.staff.full_name if self.staff else 'Unknown Staff'} | "
             f"Paid on {self.payment_date:%Y-%m-%d} | ₦{self.amount:,}"
         )
 
