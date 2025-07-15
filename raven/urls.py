@@ -67,6 +67,7 @@ from financial.views import (
     OpexViewSet,
     MonthlyRevenueBilledViewSet,
     FinancialSummaryView,
+    SalaryPaymentViewSet,
     financial_overview_view,
     financial_feeder_view,
     sales_rep_performance_view,
@@ -124,6 +125,7 @@ router.register(r'financial/expense-categories', OpexCategoryViewSet, basename='
 router.register(r'financial/expenses', OpexViewSet, basename='expense')
 router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'financial/gl-breakdowns', GLBreakdownViewSet, basename='gl-breakdown')
+router.register(r"financial/salary-payments", SalaryPaymentViewSet)
 
 router.register(r'commercial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
 router.register(r'commercial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')

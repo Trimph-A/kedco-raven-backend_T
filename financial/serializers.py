@@ -22,4 +22,11 @@ class MonthlyRevenueBilledSerializer(serializers.ModelSerializer):
         model = MonthlyRevenueBilled
         fields = '__all__'
 
+class SalaryPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SalaryPayment
+        fields = [
+            "id", "district", "month", "staff", 
+            "payment_date", "amount", "created_at"
+        ]
 

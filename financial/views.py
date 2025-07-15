@@ -69,6 +69,11 @@ class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
             qs = qs.filter(month__lte=month_to)
 
         return qs
+    
+class SalaryPaymentViewSet(viewsets.ModelViewSet):
+    queryset = SalaryPayment.objects.all()
+    serializer_class = SalaryPaymentSerializer
+    filterset_fields = ["district", "month", "staff"]
 
 
 class FinancialSummaryView(APIView):
