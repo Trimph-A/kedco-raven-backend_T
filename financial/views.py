@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from common.mixins import DistrictLocationFilterMixin
+from common.models import State, BusinessDistrict
 
 from django.db.models import Sum
 from django.utils.timezone import now
@@ -28,7 +29,11 @@ from commercial.models import SalesRepresentative
 from django.db.models import Count
 from datetime import datetime, timedelta
 from rest_framework import status
+from rest_framework.decorators import action
+from django.shortcuts import get_object_or_404
+from django.db import transaction
 from commercial.serializers import SalesRepresentativeSerializer
+from common.models import BusinessDistrict as District
 
 
 
@@ -37,8 +42,17 @@ class ExpenseCategoryViewSet(viewsets.ModelViewSet):
     serializer_class = ExpenseCategorySerializer
 
 
+# class ExpenseViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
+#     # queryset = Expense.objects.all()
+#     serializer_class = ExpenseSerializer
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_fields = {'district', 'gl_breakdown', 'opex_category', 'date'}
+
+#     def get_queryset(self):
+#         qs = Expense.objects.all()
+#         return self.filter_by_location(qs)
+
 class ExpenseViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
-    # queryset = Expense.objects.all()
     serializer_class = ExpenseSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = {'district', 'gl_breakdown', 'opex_category', 'date'}
@@ -46,6 +60,417 @@ class ExpenseViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Expense.objects.all()
         return self.filter_by_location(qs)
+
+    def get_object(self):
+        """
+        Override to handle composite key lookups for UPDATE/DELETE operations
+        """
+        queryset = self.get_queryset()
+        
+        # Check if this is a composite key lookup (from sync operations)
+        if hasattr(self.request, 'data') and '_composite_key' in self.request.data:
+            composite_key = self.request.data['_composite_key']
+            return get_object_or_404(
+                queryset,
+                district=composite_key['district'],
+                date=composite_key['date'],
+                purpose=composite_key['purpose']
+            )
+        
+        # For URL-based lookups (traditional REST), try to use pk
+        if 'pk' in self.kwargs:
+            return get_object_or_404(queryset, pk=self.kwargs['pk'])
+        
+        # Fallback to first object (shouldn't happen in normal operations)
+        return queryset.first()
+
+    def create(self, request, *args, **kwargs):
+        """
+        Handle INSERT operations with upsert logic for sync
+        """
+        data = request.data
+        
+        # Check if record already exists (upsert logic)
+        existing = self.get_queryset().filter(
+            district=data.get('district'),
+            date=data.get('date'),
+            purpose=data.get('purpose')
+        ).first()
+        
+        if existing:
+            # Update existing record
+            serializer = self.get_serializer(existing, data=data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            # Create new record
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Handle UPDATE operations using composite key
+        """
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        
+        # Remove composite key from data before serialization
+        data = request.data.copy()
+        if '_composite_key' in data:
+            del data['_composite_key']
+        
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Handle DELETE operations using composite key
+        """
+        instance = self.get_object()
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def list(self, request, *args, **kwargs):
+        """
+        Enhanced list view with better filtering for sync operations
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # Add support for composite key filtering in list operations
+        district = request.query_params.get('district')
+        date = request.query_params.get('date')
+        purpose = request.query_params.get('purpose')
+        
+        if district and date and purpose:
+            queryset = queryset.filter(
+                district=district,
+                date=date,
+                purpose=purpose
+            )
+        
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def bulk_create(self, request):
+        """
+        Handle bulk INSERT operations for sync (like Excel uploads)
+        Expected payload: {"expenses": [expense1, expense2, ...]}
+        """
+        expenses_data = request.data.get('expenses', [])
+        print(f"🐍 Received {len(expenses_data)} expenses for bulk create")
+
+        if not expenses_data:
+            return Response(
+                {'error': 'No expenses data provided'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        created_expenses = []
+        updated_expenses = []
+        errors = []
+
+        with transaction.atomic():
+            for idx, expense_data in enumerate(expenses_data):
+                try:
+                    print(f"🐍 Processing expense {idx}: {expense_data}")
+                    
+                    # 🆕 RESOLVE DISTRICT CODE TO UUID
+                    district_code = expense_data.get('district')
+                    try:
+                        # Assuming your District model has a 'code' field
+                        district_obj = District.objects.get(code=district_code)
+                        expense_data['district'] = district_obj.id  # Use UUID
+                        print(f"🐍 ✅ Resolved district '{district_code}' to UUID: {district_obj.id}")
+                    except District.DoesNotExist:
+                        print(f"🐍 ❌ District not found: {district_code}")
+                        errors.append({
+                            'index': idx,
+                            'data': expense_data,
+                            'errors': f'District code "{district_code}" not found'
+                        })
+                        continue
+                    
+                    # Check if record exists (upsert logic) - now using UUID
+                    existing = self.get_queryset().filter(
+                        district=expense_data.get('district'),  # Now UUID
+                        date=expense_data.get('date'),
+                        purpose=expense_data.get('purpose')
+                    ).first()
+
+                    if existing:
+                        print(f"🐍 Found existing record, updating...")
+                        serializer = self.get_serializer(existing, data=expense_data, partial=True)
+                        if serializer.is_valid():
+                            instance = serializer.save()
+                            print(f"🐍 ✅ Updated record with ID: {instance.id}")
+                            print(f"🐍 ✅ Updated data: {serializer.data}")
+                            updated_expenses.append(serializer.data)
+                        else:
+                            print(f"🐍 ❌ Update validation failed: {serializer.errors}")
+                            errors.append({
+                                'index': idx,
+                                'data': expense_data,
+                                'errors': serializer.errors
+                            })
+                    else:
+                        print(f"🐍 Creating new record...")
+                        serializer = self.get_serializer(data=expense_data)
+                        if serializer.is_valid():
+                            instance = serializer.save()
+                            print(f"🐍 ✅ Created record with ID: {instance.id}")
+                            print(f"🐍 ✅ Created data: {serializer.data}")
+                            created_expenses.append(serializer.data)
+                        else:
+                            print(f"🐍 ❌ Create validation failed: {serializer.errors}")
+                            errors.append({
+                                'index': idx,
+                                'data': expense_data,
+                                'errors': serializer.errors
+                            })
+
+                except Exception as e:
+                    print(f"🐍 ❌ Exception processing expense {idx}: {str(e)}")
+                    import traceback
+                    print(f"🐍 ❌ Full traceback: {traceback.format_exc()}")
+                    errors.append({
+                        'index': idx,
+                        'data': expense_data,
+                        'errors': str(e)
+                    })
+
+        print(f"🐍 Final summary: Created {len(created_expenses)}, Updated {len(updated_expenses)}, Errors {len(errors)}")
+        
+        response_data = {
+            'created': len(created_expenses),
+            'updated': len(updated_expenses),
+            'errors': len(errors),
+            'created_data': created_expenses,
+            'updated_data': updated_expenses
+        }
+
+        if errors:
+            response_data['error_details'] = errors
+            print(f"🐍 ❌ Error details: {errors}")
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['patch'])
+    def bulk_update(self, request):
+        """
+        Handle bulk UPDATE operations for sync
+        Expected payload: {"expenses": [expense1, expense2, ...]}
+        """
+        expenses_data = request.data.get('expenses', [])
+        print(f"🐍 Received {len(expenses_data)} expenses for bulk update")
+        
+        if not expenses_data:
+            return Response(
+                {'error': 'No expenses data provided'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        updated_expenses = []
+        errors = []
+
+        with transaction.atomic():
+            for idx, expense_data in enumerate(expenses_data):
+                try:
+                    print(f"🐍 Processing update expense {idx}: {expense_data}")
+                    
+                    # 🆕 RESOLVE DISTRICT CODE TO UUID
+                    district_code = None
+                    if '_composite_key' in expense_data:
+                        district_code = expense_data['_composite_key'].get('district')
+                    else:
+                        district_code = expense_data.get('district')
+                    
+                    try:
+                        district_obj = District.objects.get(code=district_code)
+                        district_uuid = district_obj.id
+                        print(f"🐍 ✅ Resolved district '{district_code}' to UUID: {district_uuid}")
+                    except District.DoesNotExist:
+                        print(f"🐍 ❌ District not found: {district_code}")
+                        errors.append({
+                            'index': idx,
+                            'data': expense_data,
+                            'errors': f'District code "{district_code}" not found'
+                        })
+                        continue
+                    
+                    # Find existing record using UUID
+                    if '_composite_key' in expense_data:
+                        composite_key = expense_data['_composite_key']
+                        existing = self.get_queryset().filter(
+                            district=district_uuid,  # Use UUID
+                            date=composite_key['date'],
+                            purpose=composite_key['purpose']
+                        ).first()
+                    else:
+                        existing = self.get_queryset().filter(
+                            district=district_uuid,  # Use UUID
+                            date=expense_data.get('date'),
+                            purpose=expense_data.get('purpose')
+                        ).first()
+
+                    if existing:
+                        # Remove composite key from data and update district with UUID
+                        clean_data = expense_data.copy()
+                        if '_composite_key' in clean_data:
+                            del clean_data['_composite_key']
+                        clean_data['district'] = district_uuid  # Set UUID
+                        
+                        print(f"🐍 Found existing record for update, ID: {existing.id}")
+                        serializer = self.get_serializer(existing, data=clean_data, partial=True)
+                        if serializer.is_valid():
+                            instance = serializer.save()
+                            print(f"🐍 ✅ Updated record with ID: {instance.id}")
+                            print(f"🐍 ✅ Updated data: {serializer.data}")
+                            updated_expenses.append(serializer.data)
+                        else:
+                            print(f"🐍 ❌ Update validation failed: {serializer.errors}")
+                            errors.append({
+                                'index': idx,
+                                'data': expense_data,
+                                'errors': serializer.errors
+                            })
+                    else:
+                        print(f"🐍 ❌ Record not found for update")
+                        errors.append({
+                            'index': idx,
+                            'data': expense_data,
+                            'errors': 'Record not found for update'
+                        })
+
+                except Exception as e:
+                    print(f"🐍 ❌ Exception processing update expense {idx}: {str(e)}")
+                    import traceback
+                    print(f"🐍 ❌ Full traceback: {traceback.format_exc()}")
+                    errors.append({
+                        'index': idx,
+                        'data': expense_data,
+                        'errors': str(e)
+                    })
+
+        print(f"🐍 Update summary: Updated {len(updated_expenses)}, Errors {len(errors)}")
+        
+        response_data = {
+            'updated': len(updated_expenses),
+            'errors': len(errors),
+            'updated_data': updated_expenses
+        }
+
+        if errors:
+            response_data['error_details'] = errors
+            print(f"🐍 ❌ Update error details: {errors}")
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['delete'])
+    def bulk_delete(self, request):
+        """
+        Handle bulk DELETE operations for sync
+        Expected payload: {"expenses": [expense1, expense2, ...]}
+        """
+        expenses_data = request.data.get('expenses', [])
+        print(f"🐍 Received {len(expenses_data)} expenses for bulk delete")
+        
+        if not expenses_data:
+            return Response(
+                {'error': 'No expenses data provided'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        deleted_count = 0
+        errors = []
+
+        with transaction.atomic():
+            for idx, expense_data in enumerate(expenses_data):
+                try:
+                    print(f"🐍 Processing delete expense {idx}: {expense_data}")
+                    
+                    # 🆕 RESOLVE DISTRICT CODE TO UUID
+                    district_code = None
+                    if '_composite_key' in expense_data:
+                        district_code = expense_data['_composite_key'].get('district')
+                    else:
+                        district_code = expense_data.get('district')
+                    
+                    try:
+                        district_obj = District.objects.get(code=district_code)
+                        district_uuid = district_obj.id
+                        print(f"🐍 ✅ Resolved district '{district_code}' to UUID: {district_uuid}")
+                    except District.DoesNotExist:
+                        print(f"🐍 ❌ District not found: {district_code}")
+                        errors.append({
+                            'index': idx,
+                            'data': expense_data,
+                            'errors': f'District code "{district_code}" not found'
+                        })
+                        continue
+                    
+                    # Find existing record using UUID
+                    if '_composite_key' in expense_data:
+                        composite_key = expense_data['_composite_key']
+                        existing = self.get_queryset().filter(
+                            district=district_uuid,  # Use UUID
+                            date=composite_key['date'],
+                            purpose=composite_key['purpose']
+                        ).first()
+                    else:
+                        existing = self.get_queryset().filter(
+                            district=district_uuid,  # Use UUID
+                            date=expense_data.get('date'),
+                            purpose=expense_data.get('purpose')
+                        ).first()
+
+                    if existing:
+                        record_id = existing.id
+                        existing.delete()
+                        deleted_count += 1
+                        print(f"🐍 ✅ Deleted record with ID: {record_id}")
+                    else:
+                        print(f"🐍 ❌ Record not found for deletion")
+                        errors.append({
+                            'index': idx,
+                            'data': expense_data,
+                            'errors': 'Record not found for deletion'
+                        })
+
+                except Exception as e:
+                    print(f"🐍 ❌ Exception processing delete expense {idx}: {str(e)}")
+                    import traceback
+                    print(f"🐍 ❌ Full traceback: {traceback.format_exc()}")
+                    errors.append({
+                        'index': idx,
+                        'data': expense_data,
+                        'errors': str(e)
+                    })
+
+        print(f"🐍 Delete summary: Deleted {deleted_count}, Errors {len(errors)}")
+        
+        response_data = {
+            'deleted': deleted_count,
+            'errors': len(errors)
+        }
+
+        if errors:
+            response_data['error_details'] = errors
+            print(f"🐍 ❌ Delete error details: {errors}")
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
 
 class GLBreakdownViewSet(viewsets.ModelViewSet):
     queryset = GLBreakdown.objects.all()
@@ -359,8 +784,8 @@ from decimal import Decimal
 
 from financial.models import Expense
 from commercial.models import MonthlyCommercialSummary
-from common.models import State
-
+from common.models import State, BusinessDistrict
+from common.models import BusinessDistrict as District
 
 class FinancialAllStatesView(APIView):
     def get(self, request):

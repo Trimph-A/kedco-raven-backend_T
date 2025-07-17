@@ -18,6 +18,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from django.db import transaction
+from django.db.models import Q
+
 
 
 
@@ -40,6 +43,24 @@ class EnergyDeliveredViewSet(viewsets.ModelViewSet):
         return qs
 
 
+# class HourlyLoadViewSet(viewsets.ModelViewSet):
+#     serializer_class = HourlyLoadSerializer
+
+#     def get_queryset(self):
+#         feeders = get_filtered_feeders(self.request)
+#         date_from, date_to = get_date_range_from_request(self.request, 'date')
+
+#         qs = HourlyLoad.objects.filter(feeder__in=feeders)
+
+#         if date_from and date_to:
+#             qs = qs.filter(date__range=(date_from, date_to))
+#         elif date_from:
+#             qs = qs.filter(date__gte=date_from)
+#         elif date_to:
+#             qs = qs.filter(date__lte=date_to)
+
+#         return qs
+
 class HourlyLoadViewSet(viewsets.ModelViewSet):
     serializer_class = HourlyLoadSerializer
 
@@ -57,6 +78,179 @@ class HourlyLoadViewSet(viewsets.ModelViewSet):
             qs = qs.filter(date__lte=date_to)
 
         return qs
+
+    @action(detail=False, methods=['post'], url_path='bulk-update')
+    def bulk_update(self, request):
+        try:
+            records = request.data.get('records', [])
+            print(f"🔄 Received {len(records)} records for bulk update")
+            
+            if not records or not isinstance(records, list):
+                return Response(
+                    {"error": "Missing or invalid 'records' array"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Track operations
+            inserted_count = 0
+            updated_count = 0
+            skipped_count = 0
+            errors = []
+
+            # Collect records for bulk operations
+            records_to_update = []
+            records_to_create = []
+            
+            # Cache feeders to avoid repeated lookups
+            feeder_cache = {}
+
+            with transaction.atomic():
+                # First pass: Validate and prepare all records
+                validated_records = []
+                
+                for i, record in enumerate(records):
+                    try:
+                        # Extract and validate fields
+                        feeder_id = record.get('feeder')
+                        date_str = record.get('date') 
+                        hour = record.get('hour')
+                        load_mw = record.get('load_mw')
+
+                        if feeder_id is None or date_str is None or hour is None or load_mw is None:
+                            errors.append(f"Record {i}: Missing required fields")
+                            continue
+
+                        # Get feeder (with caching)
+                        if feeder_id not in feeder_cache:
+                            try:
+                                feeder_cache[feeder_id] = Feeder.objects.get(slug=feeder_id)
+                            except Feeder.DoesNotExist:
+                                try:
+                                    feeder_cache[feeder_id] = Feeder.objects.get(name=feeder_id)
+                                except Feeder.DoesNotExist:
+                                    errors.append(f"Record {i}: Feeder '{feeder_id}' not found")
+                                    continue
+                        
+                        feeder = feeder_cache[feeder_id]
+
+                        # Parse date
+                        try:
+                            if 'T' in date_str:
+                                date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00')).date()
+                                date_obj = date_obj + timedelta(days=1)
+                            else:
+                                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        except ValueError:
+                            errors.append(f"Record {i}: Invalid date format '{date_str}'")
+                            continue
+
+                        # Validate hour
+                        if not (0 <= hour <= 23):
+                            errors.append(f"Record {i}: Invalid hour {hour}")
+                            continue
+
+                        validated_records.append({
+                            'feeder': feeder,
+                            'date': date_obj,
+                            'hour': hour,
+                            'load_mw': load_mw,
+                            'index': i
+                        })
+
+                    except Exception as e:
+                        errors.append(f"Record {i}: Validation error - {str(e)}")
+
+                if not validated_records:
+                    return Response({
+                        "success": False,
+                        "errors": errors,
+                        "summary": {"inserted": 0, "updated": 0, "skipped": 0}
+                    })
+
+                # Second pass: Bulk check existing records
+                existing_lookup = {}
+                lookup_conditions = []
+                
+                for vr in validated_records:
+                    lookup_conditions.append(
+                        Q(feeder=vr['feeder']) & Q(date=vr['date']) & Q(hour=vr['hour'])
+                    )
+                
+                # Single query to get all existing records
+                if lookup_conditions:
+                    combined_q = lookup_conditions[0]
+                    for condition in lookup_conditions[1:]:
+                        combined_q |= condition
+                    
+                    existing_records = HourlyLoad.objects.filter(combined_q)
+                    
+                    # Build lookup map for O(1) access
+                    for record in existing_records:
+                        key = (record.feeder.id, record.date, record.hour)
+                        existing_lookup[key] = record
+
+                print(f"📊 Found {len(existing_lookup)} existing records to check")
+
+                # Third pass: Prepare bulk operations
+                for vr in validated_records:
+                    key = (vr['feeder'].id, vr['date'], vr['hour'])
+                    
+                    if key in existing_lookup:
+                        # Record exists - check if update needed
+                        existing_record = existing_lookup[key]
+                        if existing_record.load_mw != vr['load_mw']:
+                            existing_record.load_mw = vr['load_mw']
+                            records_to_update.append(existing_record)
+                        else:
+                            skipped_count += 1
+                    else:
+                        # Record doesn't exist - prepare for creation
+                        new_record = HourlyLoad(
+                            feeder=vr['feeder'],
+                            date=vr['date'],
+                            hour=vr['hour'],
+                            load_mw=vr['load_mw']
+                        )
+                        records_to_create.append(new_record)
+
+                # Execute bulk operations
+                if records_to_create:
+                    HourlyLoad.objects.bulk_create(records_to_create)
+                    inserted_count = len(records_to_create)
+                    print(f"✅ Bulk created {inserted_count} new records")
+
+                if records_to_update:
+                    HourlyLoad.objects.bulk_update(records_to_update, ['load_mw'])
+                    updated_count = len(records_to_update)
+                    print(f"✅ Bulk updated {updated_count} existing records")
+
+            # Response
+            response_data = {
+                "success": True,
+                "summary": {
+                    "inserted": inserted_count,
+                    "updated": updated_count,
+                    "skipped": skipped_count,
+                    "total_processed": inserted_count + updated_count + skipped_count,
+                    "total_records_sent": len(records)
+                }
+            }
+
+            if errors:
+                response_data["errors"] = errors
+                response_data["error_count"] = len(errors)
+
+            print(f"🎉 Bulk operation completed: {inserted_count} inserted, {updated_count} updated, {skipped_count} skipped")
+            return Response(response_data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            print(f"💥 Bulk update error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"error": "Internal server error", "details": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class FeederInterruptionViewSet(viewsets.ModelViewSet):
@@ -99,7 +293,7 @@ class FeederInterruptionViewSet(viewsets.ModelViewSet):
 
         elif request.method == 'POST':
             # Create new interruption for a given feeder slug
-            # You’ll need to resolve the feeder instance from the slug
+            # You'll need to resolve the feeder instance from the slug
             feeder = get_object_or_404(Feeder, slug=slug)
             data = request.data.copy()
             data['feeder'] = feeder.pk  # replace slug with ID
