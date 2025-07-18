@@ -85,3 +85,62 @@ class DailyHoursOfSupply(UUIDModel, models.Model):
 
     class Meta:
         unique_together = ('feeder', 'date')
+
+
+class FeederEnergyDaily(UUIDModel, models.Model):
+    """
+    Pre-aggregated total energy delivered per feeder per day (in MWh).
+    """
+    feeder = models.ForeignKey(
+        Feeder,
+        on_delete=models.CASCADE,
+        help_text="Which feeder this daily total applies to"
+    )
+    date = models.DateField(
+        help_text="Date of the delivery"
+    )
+    energy_mwh = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        help_text="Total energy delivered (MWh) on that date"
+    )
+
+    class Meta:
+        unique_together = ("feeder", "date")
+        indexes = [
+            models.Index(fields=["date", "feeder"]),
+        ]
+        ordering = ["-date", "feeder"]
+
+    def __str__(self):
+        return f"{self.feeder.name} | {self.date} → {self.energy_mwh} MWh"
+
+
+class FeederEnergyMonthly(UUIDModel, models.Model):
+    """
+    Pre-aggregated total energy delivered per feeder per month (in MWh).
+    """
+    feeder = models.ForeignKey(
+        Feeder,
+        on_delete=models.CASCADE,
+        help_text="Which feeder this monthly total applies to"
+    )
+    period = models.DateField(
+        help_text="First day of the period month, e.g. 2025-07-01",
+        db_index=True,
+    )
+    energy_mwh = models.DecimalField(
+        max_digits=16,
+        decimal_places=4,
+        help_text="Total energy delivered (MWh) in that month"
+    )
+
+    class Meta:
+        unique_together = ("feeder", "period")
+        indexes = [
+            models.Index(fields=["period", "feeder"]),
+        ]
+        ordering = ["-period", "feeder"]
+
+    def __str__(self):
+        return f"{self.feeder.name} | {self.period:%Y-%m} → {self.energy_mwh} MWh"

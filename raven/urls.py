@@ -41,7 +41,8 @@ from commercial.views import (
     feeder_performance_view,
     feeders_by_location_view,
     CustomerBusinessMetricsView,
-    ServiceBandMetricsView
+    ServiceBandMetricsView,
+    transformer_metrics_by_feeder_view
 )
 
 from technical.views import (
@@ -57,14 +58,16 @@ from technical.views import (
     all_business_districts_technical_summary,
     business_district_technical_summary,
     FeederAvailabilityOverview,
-    service_band_technical_metrics
+    service_band_technical_metrics,
+    TransformerAvailabilityOverview
 )
 
 from financial.views import (
-    ExpenseCategoryViewSet,
-    ExpenseViewSet,
+    OpexCategoryViewSet,
+    OpexViewSet,
     MonthlyRevenueBilledViewSet,
     FinancialSummaryView,
+    SalaryPaymentViewSet,
     financial_overview_view,
     financial_feeder_view,
     sales_rep_performance_view,
@@ -73,7 +76,8 @@ from financial.views import (
     FinancialAllStatesView,
     FinancialAllBusinessDistrictsView,
     FinancialServiceBandMetricsView,
-    DailyCollectionsByMonthView
+    DailyCollectionsByMonthView,
+    financial_transformer_view
 )
 from financial.views import GLBreakdownViewSet
 
@@ -117,10 +121,11 @@ router.register(r'technical/feeder-interruptions', FeederInterruptionViewSet, ba
 router.register(r'technical/hours-of-supply', DailyHoursOfSupplyViewSet, basename='hours-of-supply')
 
 
-router.register(r'financial/expense-categories', ExpenseCategoryViewSet, basename='expense-category')
-router.register(r'financial/expenses', ExpenseViewSet, basename='expense')
+router.register(r'financial/expense-categories', OpexCategoryViewSet, basename='expense-category')
+router.register(r'financial/expenses', OpexViewSet, basename='expense')
 router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'financial/gl-breakdowns', GLBreakdownViewSet, basename='gl-breakdown')
+router.register(r"financial/salary-payments", SalaryPaymentViewSet)
 
 router.register(r'commercial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
 router.register(r'commercial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
@@ -162,6 +167,9 @@ urlpatterns = [
     path('api/metrics/commercial/feeders/metrics/', feeder_metrics, name='feeder-metrics'),
     path("api/metrics/commercial/business-metrics/", CustomerBusinessMetricsView.as_view(), name="customer-business-metrics"),
     path("api/metrics/commercial/service-band-metrics/", ServiceBandMetricsView.as_view(), name="service-band-metrics"),
+    path("api/metrics/commercial/transformers-metrics/", transformer_metrics_by_feeder_view),
+
+
 
 
 
@@ -177,6 +185,8 @@ urlpatterns = [
     path("api/financial/all-business-districts-metrics/", FinancialAllBusinessDistrictsView.as_view(), name="financial-business-districts"),
     path("api/financial/service-band-financial-metrics/", FinancialServiceBandMetricsView.as_view(), name="service-band-financial"),
     path("api/financial/daily-collections/", DailyCollectionsByMonthView.as_view(), name="daily-collections"),
+    path('api/financial/transformer-metrics/', financial_transformer_view, name='financial-transformer-metrics'),
+
 
 
 
@@ -187,7 +197,8 @@ urlpatterns = [
     path('api/technical/overview/state/', state_technical_summary, name='state-technical-summary'),
     path('api/technical/overview/business-districts/', all_business_districts_technical_summary, name='business-districts-technical-summary'),
     path('api/technical/overview/business-district/', business_district_technical_summary, name='business-district-technical-summary'),
-    path('api/technical/availability-overview/', FeederAvailabilityOverview.as_view(), name='feeder-availability-overview'),
+    path('api/technical/feeder/', FeederAvailabilityOverview.as_view(), name='feeder-availability-overview'),
+    path("api/technical/transformer/", TransformerAvailabilityOverview.as_view(), name="transformer-availability"),
     path('api/technical/service-band-technical-metrics/', service_band_technical_metrics, name='service-band-technical-metrics'),
 
 

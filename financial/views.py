@@ -52,13 +52,14 @@ class ExpenseCategoryViewSet(viewsets.ModelViewSet):
 #         qs = Expense.objects.all()
 #         return self.filter_by_location(qs)
 
-class ExpenseViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
-    serializer_class = ExpenseSerializer
+class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
+    # queryset = Expense.objects.all()
+    serializer_class = OpexSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = {'district', 'gl_breakdown', 'opex_category', 'date'}
 
     def get_queryset(self):
-        qs = Expense.objects.all()
+        qs = Opex.objects.all()
         return self.filter_by_location(qs)
 
     def get_object(self):
@@ -494,6 +495,11 @@ class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
             qs = qs.filter(month__lte=month_to)
 
         return qs
+    
+class SalaryPaymentViewSet(viewsets.ModelViewSet):
+    queryset = SalaryPayment.objects.all()
+    serializer_class = SalaryPaymentSerializer
+    filterset_fields = ["district", "month", "staff"]
 
 
 class FinancialSummaryView(APIView):
@@ -578,7 +584,7 @@ def financial_overview_view(request):
     revenue_collected = float(monthly_summary["revenue_collected"] or 0)
 
     # Expenses for selected scope
-    expenses = Expense.objects.filter(expense_filter)
+    expenses = Opex.objects.filter(expense_filter)
     total_cost = float(expenses.aggregate(total=Sum("credit"))["total"] or 0)
 
     opex_breakdown = (
@@ -617,7 +623,7 @@ def financial_overview_view(request):
             revenue_collected=Sum("revenue_collected"),
             revenue_billed=Sum("revenue_billed")
         )
-        cost = Expense.objects.filter(cost_filter).aggregate(total=Sum("credit"))["total"] or 0
+        cost = Opex.objects.filter(cost_filter).aggregate(total=Sum("credit"))["total"] or 0
 
         historical_data.append({
             "month": dt.strftime("%b"),
@@ -782,7 +788,7 @@ from datetime import date
 from django.db.models import Sum
 from decimal import Decimal
 
-from financial.models import Expense
+from financial.models import Opex
 from commercial.models import MonthlyCommercialSummary
 from common.models import State, BusinessDistrict
 from common.models import BusinessDistrict as District
@@ -797,7 +803,7 @@ class FinancialAllStatesView(APIView):
 
         for state in State.objects.all():
             # --- Total Cost (from Expenses) ---
-            expense_total = Expense.objects.filter(
+            expense_total = Opex.objects.filter(
                 date__year=year,
                 date__month=month,
                 district__state=state
@@ -847,7 +853,7 @@ from datetime import date
 from django.db.models import Sum
 from decimal import Decimal
 
-from financial.models import Expense
+from financial.models import Opex
 from commercial.models import MonthlyCommercialSummary
 from common.models import BusinessDistrict
 
@@ -872,7 +878,7 @@ class FinancialAllBusinessDistrictsView(APIView):
 
         for district in districts:
             # Total Cost (Expense model)
-            cost = Expense.objects.filter(
+            cost = Opex.objects.filter(
                 district=district,
                 date__year=year,
                 date__month=month
@@ -919,7 +925,7 @@ from random import randint
 
 from common.models import Band, Feeder
 from commercial.models import MonthlyCommercialSummary, SalesRepresentative
-from financial.models import Expense
+from financial.models import Opex
 from technical.models import EnergyDelivered
 
 
@@ -968,7 +974,7 @@ class FinancialServiceBandMetricsView(APIView):
             revenue_collected = commercial["revenue_collected"] or Decimal("0")
 
             # Aggregate total cost from expenses (filter by business districts)
-            total_cost = Expense.objects.filter(
+            total_cost = Opex.objects.filter(
                 district__in=district_ids,
                 date__year=year,
                 date__month=month
@@ -1043,3 +1049,82 @@ class DailyCollectionsByMonthView(APIView):
             current_day += timedelta(days=1)
 
         return Response(results, status=status.HTTP_200_OK)
+
+
+
+
+
+
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+from financial.models import Opex
+from common.models import Feeder, DistributionTransformer
+from commercial.date_filters import get_date_range_from_request
+from datetime import date
+from calendar import monthrange
+from django.db.models import Sum
+
+
+@api_view(['GET'])
+def financial_transformer_view(request):
+    feeder_slug = request.GET.get("feeder")
+    mode = request.GET.get("mode", "monthly")
+    year = request.GET.get("year")
+    month = request.GET.get("month")
+
+    if not feeder_slug:
+        return Response({"error": "Missing feeder slug."}, status=400)
+
+    try:
+        feeder = Feeder.objects.get(slug=feeder_slug)
+    except Feeder.DoesNotExist:
+        return Response({"error": "Feeder not found."}, status=404)
+
+    # Handle date filters
+    if mode == "monthly" and year and month:
+        year = int(year)
+        month = int(month)
+        start_day = date(year, month, 1)
+        end_day = date(year, month, monthrange(year, month)[1])
+        date_from, date_to = start_day, end_day
+    else:
+        date_from, date_to = get_date_range_from_request(request, "date")
+
+    transformer_data = []
+    for transformer in feeder.transformers.all():
+        reps = SalesRepresentative.objects.filter(
+            assigned_transformers=transformer
+        ).distinct()
+
+        summary = MonthlyCommercialSummary.objects.filter(
+            sales_rep__in=reps,
+            month__range=(date_from, date_to)
+        ).aggregate(
+            revenue_billed=Sum("revenue_billed"),
+            revenue_collected=Sum("revenue_collected")
+        )
+
+        revenue_billed = summary["revenue_billed"] or 0
+        revenue_collected = summary["revenue_collected"] or 0
+
+        total_cost = Opex.objects.filter(
+            district=feeder.business_district,
+            date__range=(date_from, date_to)
+        ).aggregate(total=Sum("credit"))["total"] or 0
+
+        transformer_data.append({
+            "transformer": transformer.name,
+            "slug": transformer.slug,
+            "total_cost": round(total_cost, 2),
+            "revenue_billed": round(revenue_billed, 2),
+            "revenue_collected": round(revenue_collected, 2),
+            "atcc": 6
+        })
+
+    return Response({
+        "feeder": feeder.name,
+        "slug": feeder.slug,
+        "transformers": transformer_data
+    })

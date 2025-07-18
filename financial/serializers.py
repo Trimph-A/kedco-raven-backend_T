@@ -1,9 +1,9 @@
 from rest_framework import serializers
 from .models import *
 
-class ExpenseCategorySerializer(serializers.ModelSerializer):
+class OpexCategorySerializer(serializers.ModelSerializer):
     class Meta:
-        model = ExpenseCategory
+        model = OpexCategory
         fields = '__all__'
 
 class GLBreakdownSerializer(serializers.ModelSerializer):
@@ -11,9 +11,9 @@ class GLBreakdownSerializer(serializers.ModelSerializer):
         model = GLBreakdown
         fields = '__all__'
 
-class ExpenseSerializer(serializers.ModelSerializer):
+class OpexSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Expense
+        model = Opex
         fields = '__all__'
 
 
@@ -22,4 +22,11 @@ class MonthlyRevenueBilledSerializer(serializers.ModelSerializer):
         model = MonthlyRevenueBilled
         fields = '__all__'
 
+class SalaryPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SalaryPayment
+        fields = [
+            "id", "district", "month", "staff", 
+            "payment_date", "amount", "created_at"
+        ]
 

@@ -8,7 +8,7 @@ def get_total_cost(request):
     feeders = get_filtered_feeders(request)
     month_from, month_to = get_date_range_from_request(request, 'month')
 
-    qs = Expense.objects.filter(feeder__in=feeders) if feeders.exists() else Expense.objects.all()
+    qs = Opex.objects.filter(feeder__in=feeders) if feeders.exists() else Opex.objects.all()
 
     if month_from and month_to:
         qs = qs.filter(month__range=(month_from, month_to))
@@ -41,7 +41,7 @@ def get_opex_breakdown(request):
     feeders = get_filtered_feeders(request)
     month_from, month_to = get_date_range_from_request(request, 'month')
 
-    qs = Expense.objects.filter(feeder__in=feeders) if feeders.exists() else Expense.objects.all()
+    qs = Opex.objects.filter(feeder__in=feeders) if feeders.exists() else Opex.objects.all()
 
     if month_from and month_to:
         qs = qs.filter(month__range=(month_from, month_to))
@@ -72,7 +72,7 @@ def get_financial_summary(request):
     state = request.GET.get('state')
     month_from, month_to = get_date_range_from_request(request, 'month')
 
-    qs = Expense.objects.all()
+    qs = Opex.objects.all()
     if state:
         qs = qs.filter(district__state__slug=state)
     if district:
@@ -93,12 +93,14 @@ def get_financial_summary(request):
         "opex_breakdown": list(opex_breakdown)
     }
 
-
 from django.db.models import Sum
-from commercial.models import MonthlyRevenueBilled, DailyRevenueCollected
+from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+from financial.models import Opex
 from common.models import Feeder
+from commercial.date_filters import get_date_range_from_request
 from datetime import date
 from calendar import monthrange
+
 
 def get_financial_feeder_data(request):
     state = request.GET.get("state")
@@ -145,13 +147,20 @@ def get_financial_feeder_data(request):
         revenue_collected = summary["revenue_collected"] or 0
 
         # Aggregate cost from expenses in feeder's business district
-        total_cost = Expense.objects.filter(
+        total_cost = Opex.objects.filter(
             district=feeder.business_district,
             date__range=(date_from, date_to)
         ).aggregate(total=Sum("credit"))["total"] or 0
 
+        bd_obj = feeder.business_district
+
         data.append({
             "feeder": feeder.name,
+            "slug": feeder.slug,
+            "business_district": {
+                "name": bd_obj.name if bd_obj else None,
+                "slug": bd_obj.slug if bd_obj else None,
+            },
             "total_cost": round(total_cost, 2),
             "revenue_billed": round(revenue_billed, 2),
             "revenue_collected": round(revenue_collected, 2),
