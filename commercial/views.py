@@ -1,27 +1,40 @@
-from rest_framework import viewsets
+# commercial/views.py
+import random
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from datetime import date, datetime
+from dateutil.relativedelta import relativedelta  # type: ignore
+
+from django.db.models import (
+    Sum, F, FloatField, ExpressionWrapper, Q,
+    Case, When, Value, Count, Avg, DurationField
+)
+from django.utils.dateparse import parse_date
+
+from rest_framework import viewsets, status
+from rest_framework.decorators import action, api_view
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from .models import *
 from .serializers import *
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from django.db.models import Sum, F, FloatField, ExpressionWrapper, Q
-from common.models import Feeder, State, BusinessDistrict
-from datetime import datetime
 from .utils import get_filtered_feeders
+
+from common.models import Feeder, State, BusinessDistrict, Band
+from commercial.models import (
+    DailyCollection, MonthlyCommercialSummary, MonthlyEnergyBilled
+)
 from commercial.date_filters import get_date_range_from_request
 from commercial.mixins import FeederFilteredQuerySetMixin
 from commercial.utils import get_filtered_customers
-from commercial.metrics import calculate_derived_metrics, get_sales_rep_performance_summary
-from rest_framework.decorators import api_view
-from decimal import Decimal, InvalidOperation
+from commercial.metrics import (
+    calculate_derived_metrics,
+    get_sales_rep_performance_summary
+)
+from commercial.analytics import get_commercial_overview_data
+
 from technical.models import EnergyDelivered, HourlyLoad, FeederInterruption
 from financial.models import MonthlyRevenueBilled, Opex
-from commercial.models import DailyCollection
-from django.utils.dateparse import parse_date
-from datetime import date
-from dateutil.relativedelta import relativedelta # type: ignore
-from django.db.models import Sum, FloatField, F, ExpressionWrapper, Case, When, Value, Count, Avg
-from django.db.models import DurationField
-import random
+
 
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -269,9 +282,7 @@ class DailyCollectionViewSet(viewsets.ModelViewSet):
         return qs
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from commercial.analytics import get_commercial_overview_data
+
 
 class CommercialOverviewAPIView(APIView):
     def get(self, request):
@@ -982,19 +993,6 @@ def transformer_metrics_by_feeder_view(request):
     return Response(result)
 
 
-
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from datetime import date
-from dateutil.relativedelta import relativedelta # type: ignore
-from django.db.models import Sum, F
-from commercial.models import MonthlyCommercialSummary
-from common.models import State, BusinessDistrict
-from commercial.models import MonthlyCommercialSummary, MonthlyEnergyBilled
-
-
 class CustomerBusinessMetricsView(APIView):
     def get(self, request):
         year = int(request.GET.get("year"))
@@ -1154,19 +1152,6 @@ class CustomerBusinessMetricsView(APIView):
         
         results.update(energy_data)
         return Response(results, status=status.HTTP_200_OK)
-
-
-
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from datetime import date
-from dateutil.relativedelta import relativedelta # type: ignore
-from django.db.models import Sum
-from decimal import Decimal
-from common.models import Band
-from commercial.models import MonthlyCommercialSummary, MonthlyEnergyBilled
 
 class ServiceBandMetricsView(APIView):
     def get(self, request):
