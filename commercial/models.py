@@ -1,3 +1,4 @@
+# commercial/models.py
 from django.db import models
 from common.models import UUIDModel, DistributionTransformer, Band, Feeder
 from django.utils import timezone

@@ -1,3 +1,4 @@
+# hr/views.py
 from rest_framework import viewsets
 from .models import Department, Role, Staff
 from .serializers import DepartmentSerializer, RoleSerializer, StaffSerializer

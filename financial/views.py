@@ -1,3 +1,4 @@
+# financial/views.py
 import random
 from random import randint
 from datetime import date, datetime, timedelta
