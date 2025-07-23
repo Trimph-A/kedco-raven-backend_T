@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import *
+from common.models import DistributionTransformer
 from common.serializers import FeederSerializer
 
 
@@ -38,7 +39,15 @@ class MonthlyCustomerStatsSerializer(serializers.ModelSerializer):
         model = MonthlyCustomerStats
         fields = '__all__'
 
+class TransformerDetailSerializer(serializers.ModelSerializer):
+    """Serializer for transformer details in sales rep response"""
+    class Meta:
+        model = DistributionTransformer
+        fields = ['id', 'name', 'slug']
+
 class SalesRepresentativeSerializer(serializers.ModelSerializer):
+    assigned_transformers = TransformerDetailSerializer(many=True, read_only=True)
+
     class Meta:
         model = SalesRepresentative
         fields = '__all__'

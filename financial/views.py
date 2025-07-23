@@ -583,6 +583,13 @@ def financial_feeder_view(request):
     return Response(data)
 
 
+def calculate_percentage_change(current_value, previous_value):
+    """Calculate percentage change between two values"""
+    if previous_value == 0:
+        return 100 if current_value > 0 else 0
+    return ((current_value - previous_value) / previous_value) * 100
+
+
 @api_view(["GET"])
 def sales_rep_performance_view(request, rep_id):
     try:
@@ -596,6 +603,10 @@ def sales_rep_performance_view(request, rep_id):
 
     start_date = datetime(year, month, 1)
     end_date = (start_date + relativedelta(months=1)) - timedelta(days=1)
+    
+    # Previous month dates for delta calculations
+    prev_month_start = start_date - relativedelta(months=1)
+    prev_month_end = (prev_month_start + relativedelta(months=1)) - timedelta(days=1)
 
     # Current month summary
     current_summary = MonthlyCommercialSummary.objects.filter(
@@ -604,22 +615,72 @@ def sales_rep_performance_view(request, rep_id):
     ).aggregate(
         revenue_billed=Sum("revenue_billed"),
         revenue_collected=Sum("revenue_collected"),
+        customers_billed=Sum("customers_billed"),
+        customers_responded=Sum("customers_responded"),
     )
 
+    # Previous month summary for delta calculations
+    previous_summary = MonthlyCommercialSummary.objects.filter(
+        sales_rep=rep,
+        month__range=(prev_month_start, prev_month_end)
+    ).aggregate(
+        revenue_billed=Sum("revenue_billed"),
+        revenue_collected=Sum("revenue_collected"),
+        customers_billed=Sum("customers_billed"),
+        customers_responded=Sum("customers_responded"),
+    )
+
+    # Current month values
     revenue_billed = current_summary["revenue_billed"] or 0
     revenue_collected = current_summary["revenue_collected"] or 0
+    customers_billed = current_summary["customers_billed"] or 0
+    customers_responded = current_summary["customers_responded"] or 0
     outstanding_billed = revenue_billed - revenue_collected
 
-    # All-time
+    # Previous month values
+    prev_revenue_billed = previous_summary["revenue_billed"] or 0
+    prev_revenue_collected = previous_summary["revenue_collected"] or 0
+    prev_customers_billed = previous_summary["customers_billed"] or 0
+    prev_customers_responded = previous_summary["customers_responded"] or 0
+    prev_outstanding_billed = prev_revenue_billed - prev_revenue_collected
+
+    # Calculate additional metrics
+    days_in_month = (end_date - start_date).days + 1
+    daily_run_rate = revenue_collected / days_in_month if days_in_month > 0 else 0
+    
+    prev_days_in_month = (prev_month_end - prev_month_start).days + 1
+    prev_daily_run_rate = prev_revenue_collected / prev_days_in_month if prev_days_in_month > 0 else 0
+    
+    collections_on_outstanding = 0  # Placeholder as requested
+    prev_collections_on_outstanding = 0  # Placeholder
+    
+    # Using customers_billed as active accounts
+    active_accounts = customers_billed
+    prev_active_accounts = prev_customers_billed
+    
+    # Using customers_billed - customers_responded as suspended accounts
+    suspended_accounts = max(0, customers_billed - customers_responded)
+    prev_suspended_accounts = max(0, prev_customers_billed - prev_customers_responded)
+
+    # Calculate deltas (percentage changes)
+    revenue_billed_delta = calculate_percentage_change(revenue_billed, prev_revenue_billed)
+    revenue_collected_delta = calculate_percentage_change(revenue_collected, prev_revenue_collected)
+    outstanding_billed_delta = calculate_percentage_change(outstanding_billed, prev_outstanding_billed)
+    daily_run_rate_delta = calculate_percentage_change(daily_run_rate, prev_daily_run_rate)
+    collections_on_outstanding_delta = calculate_percentage_change(collections_on_outstanding, prev_collections_on_outstanding)
+    active_accounts_delta = calculate_percentage_change(active_accounts, prev_active_accounts)
+    suspended_accounts_delta = calculate_percentage_change(suspended_accounts, prev_suspended_accounts)
+
+    # All-time summary
     all_time_summary = MonthlyCommercialSummary.objects.filter(sales_rep=rep).aggregate(
         all_time_billed=Sum("revenue_billed"),
         all_time_collected=Sum("revenue_collected")
     )
     outstanding_all_time = (all_time_summary["all_time_billed"] or 0) - (all_time_summary["all_time_collected"] or 0)
 
-    # ---- Previous 4 Months ---- #
+    # ---- Previous 4 Months (excluding current month) ---- #
     monthly_summaries = []
-    for i in range(4):
+    for i in range(1, 5):  # Start from 1 to exclude current month, go to 5 to get 4 months
         ref_date = start_date - relativedelta(months=i)
         month_start = ref_date.replace(day=1)
         month_end = (month_start + relativedelta(months=1)) - timedelta(days=1)
@@ -643,7 +704,7 @@ def sales_rep_performance_view(request, rep_id):
             "outstanding_billed": outstanding
         })
 
-    monthly_summaries.reverse()
+    monthly_summaries.reverse()  # Reverse to show oldest to newest
 
     return Response({
         "sales_rep": {
@@ -651,9 +712,34 @@ def sales_rep_performance_view(request, rep_id):
             "name": rep.name
         },
         "current": {
-            "revenue_billed": revenue_billed,
-            "revenue_collected": revenue_collected,
-            "outstanding_billed": outstanding_billed
+            "revenue_billed": {
+                "value": revenue_billed,
+                "delta": round(revenue_billed_delta, 2)
+            },
+            "revenue_collected": {
+                "value": revenue_collected,
+                "delta": round(revenue_collected_delta, 2)
+            },
+            "outstanding_billed": {
+                "value": outstanding_billed,
+                "delta": round(outstanding_billed_delta, 2)
+            },
+            "daily_run_rate": {
+                "value": round(daily_run_rate, 2),
+                "delta": round(daily_run_rate_delta, 2)
+            },
+            "collections_on_outstanding": {
+                "value": collections_on_outstanding,
+                "delta": round(collections_on_outstanding_delta, 2)
+            },
+            "active_accounts": {
+                "value": active_accounts,
+                "delta": round(active_accounts_delta, 2)
+            },
+            "suspended_accounts": {
+                "value": suspended_accounts,
+                "delta": round(suspended_accounts_delta, 2)
+            }
         },
         "outstanding_all_time": outstanding_all_time,
         "previous_months": monthly_summaries
@@ -661,45 +747,16 @@ def sales_rep_performance_view(request, rep_id):
 
 @api_view(["GET"])
 def list_sales_reps(request):
-    reps = SalesRepresentative.objects.all()[:10]
+    reps = SalesRepresentative.objects.select_related(
+        
+    ).prefetch_related(
+        'assigned_transformers'  # Adjust field name as needed
+    ).all()
+
+    reps = reps.order_by('name')
+
     data = SalesRepresentativeSerializer(reps, many=True).data
     return Response(data)
-
-
-@api_view(["GET"])
-def sales_rep_global_summary_view(request):
-    mode = request.GET.get("mode", "monthly")
-
-    if mode == "monthly":
-        try:
-            year = int(request.GET.get("year", datetime.now().year))
-            month = int(request.GET.get("month", datetime.now().month))
-            start_date = datetime(year, month, 1)
-            end_date = (start_date + relativedelta(months=1)) - relativedelta(days=1)
-        except (TypeError, ValueError):
-            return Response({"error": "Invalid year or month for monthly mode"}, status=400)
-    else:
-        from common.filters import get_date_range_from_request
-        start_date, end_date = get_date_range_from_request(request, "month")
-
-    summary = MonthlyCommercialSummary.objects.filter(
-        month__range=(start_date, end_date)
-    ).aggregate(
-        total_billed=Sum("revenue_billed"),
-        total_collected=Sum("revenue_collected"),
-        active_accounts=Count("id")
-    )
-
-    total_billed = summary["total_billed"] or 0
-    total_collected = summary["total_collected"] or 0
-    active_accounts = summary["active_accounts"] or 0
-
-    return Response({
-        "daily_run_rate": total_billed / 30,
-        "collections_on_outstanding": total_collected,
-        "active_accounts": active_accounts,
-        "suspended_accounts": 0
-    })
 
 
 
@@ -814,19 +871,64 @@ class FinancialAllBusinessDistrictsView(APIView):
             return Response({"error": "State not found"}, status=status.HTTP_404_NOT_FOUND)
 
         target_month = date(year, month, 1)
+        target_month_end = target_month + relativedelta(months=1)
         results = []
 
         districts = BusinessDistrict.objects.filter(state=state)
 
         for district in districts:
-            # Total Cost (Expense model)
-            cost = Opex.objects.filter(
+            # --- Total Cost Calculation (All cost components) ---
+            # OPEX (both credit and debit)
+            opex_data = Opex.objects.filter(
                 district=district,
                 date__year=year,
                 date__month=month
-            ).aggregate(total_cost=Sum("credit"))["total_cost"] or Decimal("0")
+            ).aggregate(
+                credit_total=Sum("credit"),
+                debit_total=Sum("debit")
+            )
+            
+            opex_total = Decimal(opex_data["credit_total"] or 0) + Decimal(opex_data["debit_total"] or 0)
 
-            # Get all sales reps mapped to district via feeder
+            # Salaries for the district
+            salary_total = SalaryPayment.objects.filter(
+                district=district,
+                month=target_month
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+
+            # --- Energy-based NBET/MO Allocation ---
+            # Get district's energy share for proportional allocation
+            district_energy = EnergyDelivered.objects.filter(
+                feeder__business_district=district,
+                date__year=year,
+                date__month=month
+            ).aggregate(total_energy=Sum("energy_mwh"))["total_energy"] or Decimal("0")
+
+            # Total energy delivered across all feeders for the month
+            total_energy = EnergyDelivered.objects.filter(
+                date__year=year,
+                date__month=month
+            ).aggregate(total_energy=Sum("energy_mwh"))["total_energy"] or Decimal("0")
+
+            # Calculate energy share (0-1)
+            energy_share = (district_energy / total_energy) if total_energy > 0 else Decimal("0")
+
+            # NBET Invoice (allocated proportionally)
+            nbet_total = NBETInvoice.objects.filter(
+                month=target_month
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            nbet_allocated = nbet_total * energy_share
+
+            # MO Invoice (allocated proportionally)
+            mo_total = MOInvoice.objects.filter(
+                month=target_month
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            mo_allocated = mo_total * energy_share
+
+            # Total cost = OPEX + Salaries + Allocated NBET + Allocated MO
+            total_cost = opex_total + salary_total + nbet_allocated + mo_allocated
+
+            # --- Revenue Billed and Collections ---
             sales_reps = SalesRepresentative.objects.filter(
                 assigned_transformers__feeder__business_district=district
             ).distinct()
@@ -839,18 +941,35 @@ class FinancialAllBusinessDistrictsView(APIView):
                 collections=Sum("revenue_collected")
             )
 
-            billed = commercial_data["revenue_billed"] or Decimal("0")
-            collected = commercial_data["collections"] or Decimal("0")
+            revenue_billed = commercial_data["revenue_billed"] or Decimal("0")
+            collections = commercial_data["collections"] or Decimal("0")
 
-            # Random Tariff Loss (simulate)
-            tariff_loss = Decimal(random.randint(10, 50))
+            # --- Real Tariff Loss Calculation ---
+            # Get MYTO tariff (latest applicable)
+            myto_tariff_obj = MYTOTariff.objects.filter(
+                effective_date__lte=target_month
+            ).order_by("-effective_date").first()
+            
+            myto_tariff = myto_tariff_obj.rate_per_kwh if myto_tariff_obj else Decimal("60")
+
+            # Calculate actual tariff collected (Collections / Energy in kWh)
+            if district_energy > 0:
+                district_energy_kwh = district_energy * 1000  # Convert MWh to kWh
+                actual_tariff_collected = collections / district_energy_kwh
+                billing_tariff = revenue_billed / district_energy_kwh
+            else:
+                actual_tariff_collected = Decimal("0")
+                billing_tariff = Decimal("0")
+
+            # Tariff Loss = MYTO Tariff - Actual Tariff Collected
+            tariff_loss = myto_tariff - actual_tariff_collected
 
             results.append({
                 "district": district.name,
-                "total_cost": round(cost, 2),
-                "revenue_billed": round(billed, 2),
-                "collections": round(collected, 2),
-                "tariff_loss": f"{tariff_loss}"
+                "total_cost": float(round(total_cost, 2)),
+                "revenue_billed": float(round(revenue_billed, 2)),
+                "collections": float(round(collections, 2)),
+                "tariff_loss": float(round(tariff_loss, 2))
             })
 
         return Response(results, status=status.HTTP_200_OK)
@@ -866,6 +985,7 @@ class FinancialServiceBandMetricsView(APIView):
 
         state_name = request.GET.get("state")
         selected_date = date(year, month, 1)
+        selected_end = selected_date + relativedelta(months=1)
 
         bands = Band.objects.all()
         results = []
@@ -882,6 +1002,58 @@ class FinancialServiceBandMetricsView(APIView):
             # Get distinct business districts tied to the feeders
             district_ids = feeders.values_list("business_district_id", flat=True).distinct()
 
+            # --- Total Cost Calculation (All cost components) ---
+            # OPEX (both credit and debit) from relevant districts
+            opex_data = Opex.objects.filter(
+                district__in=district_ids,
+                date__year=year,
+                date__month=month
+            ).aggregate(
+                credit_total=Sum("credit"),
+                debit_total=Sum("debit")
+            )
+            
+            opex_total = Decimal(opex_data["credit_total"] or 0) + Decimal(opex_data["debit_total"] or 0)
+
+            # Salaries for the districts
+            salary_total = SalaryPayment.objects.filter(
+                district__in=district_ids,
+                month=selected_date
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+
+            # --- Energy-based NBET/MO Allocation ---
+            # Get band's energy share for proportional allocation
+            band_energy = EnergyDelivered.objects.filter(
+                feeder__in=feeders,
+                date__year=year,
+                date__month=month
+            ).aggregate(total_energy=Sum("energy_mwh"))["total_energy"] or Decimal("0")
+
+            # Total energy delivered across all feeders for the month
+            total_energy = EnergyDelivered.objects.filter(
+                date__year=year,
+                date__month=month
+            ).aggregate(total_energy=Sum("energy_mwh"))["total_energy"] or Decimal("0")
+
+            # Calculate energy share (0-1)
+            energy_share = (band_energy / total_energy) if total_energy > 0 else Decimal("0")
+
+            # NBET Invoice (allocated proportionally)
+            nbet_total = NBETInvoice.objects.filter(
+                month=selected_date
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            nbet_allocated = nbet_total * energy_share
+
+            # MO Invoice (allocated proportionally)
+            mo_total = MOInvoice.objects.filter(
+                month=selected_date
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            mo_allocated = mo_total * energy_share
+
+            # Total cost = OPEX + Salaries + Allocated NBET + Allocated MO
+            total_cost = opex_total + salary_total + nbet_allocated + mo_allocated
+
+            # --- Revenue and Collections ---
             # Get all sales reps tied to feeders via transformers
             sales_reps = SalesRepresentative.objects.filter(
                 assigned_transformers__feeder__in=feeders
@@ -899,36 +1071,32 @@ class FinancialServiceBandMetricsView(APIView):
             revenue_billed = commercial["revenue_billed"] or Decimal("0")
             revenue_collected = commercial["revenue_collected"] or Decimal("0")
 
-            # Aggregate total cost from expenses (filter by business districts)
-            total_cost = Opex.objects.filter(
-                district__in=district_ids,
-                date__year=year,
-                date__month=month
-            ).aggregate(total=Sum("credit"))["total"] or Decimal("0")
+            # --- Real Tariff Calculations ---
+            # Get MYTO tariff (latest applicable)
+            myto_tariff_obj = MYTOTariff.objects.filter(
+                effective_date__lte=selected_date
+            ).order_by("-effective_date").first()
+            
+            myto_tariff = myto_tariff_obj.rate_per_kwh if myto_tariff_obj else Decimal("60")
 
-            # Aggregate energy delivered
-            energy_delivered = EnergyDelivered.objects.filter(
-                feeder__in=feeders,
-                date__year=year,
-                date__month=month
-            ).aggregate(total_energy=Sum("energy_mwh"))["total_energy"] or Decimal("0")
+            # Calculate actual tariff collected (Collections / Energy in kWh)
+            if band_energy > 0:
+                band_energy_kwh = band_energy * 1000  # Convert MWh to kWh
+                actual_tariff_collected = revenue_collected / band_energy_kwh
+            else:
+                actual_tariff_collected = Decimal("0")
 
-            # Tariff Calculations
-            myto_tariff = Decimal(randint(55, 65))  # Static/random per band
-            actual_tariff = (
-                round(revenue_collected / energy_delivered, 2)
-                if energy_delivered else Decimal("0")
-            )
-            tariff_loss = round(myto_tariff - actual_tariff, 2)
+            # Tariff Loss = MYTO Tariff - Actual Tariff Collected
+            tariff_loss = myto_tariff - actual_tariff_collected
 
             results.append({
                 "band": band.name,
-                "total_cost": round(total_cost, 2),
-                "revenue_billed": round(revenue_billed, 2),
-                "collections": round(revenue_collected, 2),
-                "myto_allowed_tariff": f"{myto_tariff}",
-                "actual_tariff_collected": f"{actual_tariff}",
-                "tariff_loss": f"{tariff_loss}"
+                "total_cost": float(round(total_cost, 2)),
+                "revenue_billed": float(round(revenue_billed, 2)),
+                "collections": float(round(revenue_collected, 2)),
+                "myto_allowed_tariff": f"{round(myto_tariff, 2)}",
+                "actual_tariff_collected": f"{round(actual_tariff_collected, 2)}",
+                "tariff_loss": f"{round(tariff_loss, 2)}"
             })
 
         return Response(results, status=status.HTTP_200_OK)
