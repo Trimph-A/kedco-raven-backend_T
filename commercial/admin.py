@@ -26,7 +26,7 @@ class MonthlyEnergyBilledAdmin(admin.ModelAdmin):
 
 @admin.register(MonthlyRevenueBilled)
 class MonthlyRevenueBilledAdmin(admin.ModelAdmin):
-    list_display = ['feeder', 'month', 'amount']
+    list_display = ['month', 'amount']
     list_filter = ['month',]
 
 

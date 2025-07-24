@@ -78,12 +78,28 @@ class DailyEnergyDeliveredViewSet(FeederFilteredQuerySetMixin, viewsets.ModelVie
         return queryset
 
 
-class MonthlyRevenueBilledViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
+class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
     serializer_class = MonthlyRevenueBilledSerializer
 
     def get_queryset(self):
         queryset = MonthlyRevenueBilled.objects.all()
-        queryset = self.filter_by_location(queryset)
+        
+        # Custom location filtering for MonthlyRevenueBilled
+        state_name = self.request.GET.get('state')
+        district_name = self.request.GET.get('business_district')
+        feeder_slug = self.request.GET.get('feeder')
+        transformer_slug = self.request.GET.get('transformer')
+
+        if transformer_slug:
+            queryset = queryset.filter(transformer__slug=transformer_slug)
+        elif feeder_slug:
+            queryset = queryset.filter(feeder__slug=feeder_slug)
+        elif district_name:
+            queryset = queryset.filter(feeder__business_district__name__iexact=district_name)
+        elif state_name:
+            queryset = queryset.filter(feeder__business_district__state__name__iexact=state_name)
+
+        # Date filtering
         month_from, month_to = get_date_range_from_request(self.request, 'month')
 
         if month_from and month_to:
@@ -93,7 +109,64 @@ class MonthlyRevenueBilledViewSet(FeederFilteredQuerySetMixin, viewsets.ModelVie
         elif month_to:
             queryset = queryset.filter(month__lte=month_to)
 
-        return queryset
+        return queryset.select_related(
+            'feeder', 'transformer', 'feeder__business_district',
+            'feeder__business_district__state'
+        )
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get revenue billing summary with aggregations"""
+        queryset = self.get_queryset()
+        
+        # Basic aggregations
+        summary_data = queryset.aggregate(
+            total_amount=Sum('amount'),
+            total_records=Count('id'),
+            avg_amount=Avg('amount')
+        )
+
+        # Group by feeder
+        by_feeder = queryset.values(
+            'feeder__name', 'feeder__slug'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by transformer (if applicable)
+        by_transformer = queryset.filter(
+            transformer__isnull=False
+        ).values(
+            'transformer__name', 'transformer__slug'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by business district
+        by_district = queryset.values(
+            'feeder__business_district__name'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by state
+        by_state = queryset.values(
+            'feeder__business_district__state__name'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        return Response({
+            'summary': summary_data,
+            'by_feeder': by_feeder,
+            'by_transformer': by_transformer,
+            'by_district': by_district,
+            'by_state': by_state
+        })
 
 
 class MonthlyEnergyBilledViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
