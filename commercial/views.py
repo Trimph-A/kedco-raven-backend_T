@@ -167,6 +167,88 @@ class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
             'by_district': by_district,
             'by_state': by_state
         })
+    
+
+class DailyCollectionViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
+    serializer_class = DailyCollectionSerializer
+
+    def get_queryset(self):
+        queryset = DailyCollection.objects.all()
+        queryset = self.filter_by_location(queryset)
+        date_from, date_to = get_date_range_from_request(self.request, 'date')
+
+        if date_from and date_to:
+            queryset = queryset.filter(date__range=(date_from, date_to))
+        elif date_from:
+            queryset = queryset.filter(date__gte=date_from)
+        elif date_to:
+            queryset = queryset.filter(date__lte=date_to)
+
+        # Additional filters
+        collection_type = self.request.GET.get('collection_type')
+        if collection_type:
+            queryset = queryset.filter(collection_type=collection_type)
+
+        vendor_name = self.request.GET.get('vendor_name')
+        if vendor_name:
+            queryset = queryset.filter(vendor_name=vendor_name)
+
+        sales_rep_slug = self.request.GET.get('sales_rep')
+        if sales_rep_slug:
+            queryset = queryset.filter(sales_rep__slug=sales_rep_slug)
+
+        transformer_slug = self.request.GET.get('transformer')
+        if transformer_slug:
+            queryset = queryset.filter(transformer__slug=transformer_slug)
+
+        return queryset.select_related(
+            'sales_rep', 'transformer', 'transformer__feeder', 
+            'transformer__feeder__business_district', 
+            'transformer__feeder__business_district__state'
+        )
+
+    def perform_create(self, serializer):
+        """Override to add any additional logic during creation"""
+        serializer.save()
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get collection summary with aggregations"""
+        queryset = self.get_queryset()
+        
+        # Basic aggregations
+        summary_data = queryset.aggregate(
+            total_amount=Sum('amount'),
+            total_collections=Count('id'),
+            avg_collection=Avg('amount')
+        )
+
+        # Group by collection type
+        by_type = queryset.values('collection_type').annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by vendor
+        by_vendor = queryset.values('vendor_name').annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by sales rep
+        by_sales_rep = queryset.values(
+            'sales_rep__name', 'sales_rep__slug'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        return Response({
+            'summary': summary_data,
+            'by_collection_type': by_type,
+            'by_vendor': by_vendor,
+            'by_sales_rep': by_sales_rep
+        })
 
 
 class MonthlyEnergyBilledViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):

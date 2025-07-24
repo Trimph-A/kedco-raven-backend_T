@@ -107,7 +107,8 @@ router.register(r'bands', BandViewSet)
 
 router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'daily-energy-delivered', DailyEnergyDeliveredViewSet, basename='daily-energy-delivered')
-# router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+router.register(r'daily-collections', DailyCollectionViewSet, basename='daily-collections')
 router.register(r'monthly-energy-billed', MonthlyEnergyBilledViewSet, basename='monthly-energy-billed')
 router.register(r'monthly-customer-stats', MonthlyCustomerStatsViewSet, basename='monthly-customer-stats')
 
@@ -120,7 +121,6 @@ router.register(r'technical/hours-of-supply', DailyHoursOfSupplyViewSet, basenam
 
 router.register(r'financial/expense-categories', OpexCategoryViewSet, basename='expense-category')
 router.register(r'financial/expenses', OpexViewSet, basename='expense')
-router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'financial/gl-breakdowns', GLBreakdownViewSet, basename='gl-breakdown')
 router.register(r"financial/salary-payments", SalaryPaymentViewSet)
 

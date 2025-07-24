@@ -88,8 +88,8 @@ class MonthlyRevenueBilled(UUIDModel, models.Model):
         unique_together = ('sales_rep', 'transformer', 'month')
         ordering = ['-month', 'sales_rep', 'transformer']
 
-    # def __str__(self):
-    #     return f"{self.sales_rep.name} - {self.transformer.name} - {self.month.strftime('%Y-%m')} - ₦{self.amount}"
+    def __str__(self):
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.month.strftime('%Y-%m')} - ₦{self.amount}"
     
 class DailyCollection(UUIDModel, models.Model):
     COLLECTION_TYPE_CHOICES = (
