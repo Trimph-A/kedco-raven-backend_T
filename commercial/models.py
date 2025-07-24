@@ -117,6 +117,7 @@ class DailyCollection(UUIDModel, models.Model):
 
 class MonthlyCommercialSummary(UUIDModel):
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    transformer = models.ForeignKey(DistributionTransformer, on_delete=models.CASCADE)
     month = models.DateField()
 
     customers_billed = models.PositiveIntegerField(default=0)
@@ -128,4 +129,7 @@ class MonthlyCommercialSummary(UUIDModel):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("sales_rep", "month")
+        unique_together = ("sales_rep", "transformer", "month")
+
+    def __str__(self):
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.month.strftime('%Y-%m')}"
