@@ -104,6 +104,7 @@ class DailyCollection(UUIDModel, models.Model):
     ]
 
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    transformer = models.ForeignKey(DistributionTransformer, on_delete=models.CASCADE)
     date = models.DateField()
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     collection_type = models.CharField(max_length=10, choices=COLLECTION_TYPE_CHOICES)
@@ -113,6 +114,13 @@ class DailyCollection(UUIDModel, models.Model):
         help_text="Vendor through which collection was made"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("sales_rep", "transformer", "date", "collection_type", "vendor_name")
+        ordering = ['-date', 'sales_rep', 'transformer']
+
+    def __str__(self):
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.date} - ₦{self.amount}"
 
 
 class MonthlyCommercialSummary(UUIDModel):
