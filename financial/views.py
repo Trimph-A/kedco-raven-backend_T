@@ -29,7 +29,6 @@ from common.models import (
 
 from commercial.models import (
     MonthlyCommercialSummary,
-    DailyRevenueCollected,
     DailyEnergyDelivered,
     SalesRepresentative,
     DailyCollection

@@ -16,12 +16,6 @@ class DailyEnergyDeliveredSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class DailyRevenueCollectedSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DailyRevenueCollected
-        fields = '__all__'
-
-
 class MonthlyRevenueBilledSerializer(serializers.ModelSerializer):
     class Meta:
         model = MonthlyRevenueBilled

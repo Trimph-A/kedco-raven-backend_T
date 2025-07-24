@@ -78,24 +78,6 @@ class DailyEnergyDeliveredViewSet(FeederFilteredQuerySetMixin, viewsets.ModelVie
         return queryset
 
 
-class DailyRevenueCollectedViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
-    serializer_class = DailyRevenueCollectedSerializer
-
-    def get_queryset(self):
-        queryset = DailyRevenueCollected.objects.all()
-        queryset = self.filter_by_location(queryset)
-        date_from, date_to = get_date_range_from_request(self.request, 'date')
-
-        if date_from and date_to:
-            queryset = queryset.filter(date__range=(date_from, date_to))
-        elif date_from:
-            queryset = queryset.filter(date__gte=date_from)
-        elif date_to:
-            queryset = queryset.filter(date__lte=date_to)
-
-        return queryset
-
-
 class MonthlyRevenueBilledViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MonthlyRevenueBilledSerializer
 
@@ -185,10 +167,11 @@ class FeederMetricsView(APIView):
                 date__range=(date_from, date_to)
             ).aggregate(total=Sum('energy_mwh'))['total'] or 0
 
-            revenue_collected = DailyRevenueCollected.objects.filter(
-                feeder=feeder,
-                date__range=(date_from, date_to)
-            ).aggregate(total=Sum('amount'))['total'] or 0
+            # revenue_collected = DailyRevenueCollected.objects.filter(
+            #     feeder=feeder,
+            #     date__range=(date_from, date_to)
+            # ).aggregate(total=Sum('amount'))['total'] or 0
+            revenue_collected=0
 
             revenue_billed = MonthlyRevenueBilled.objects.filter(
                 feeder=feeder,

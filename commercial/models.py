@@ -37,15 +37,6 @@ class DailyEnergyDelivered(UUIDModel, models.Model):
         unique_together = ('feeder', 'date')
 
 
-class DailyRevenueCollected(UUIDModel, models.Model):
-    feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE)
-    date = models.DateField()
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
-
-    class Meta:
-        unique_together = ('feeder', 'date')
-
-
 class MonthlyRevenueBilled(UUIDModel, models.Model):
     feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE, related_name='commercial_monthly_revenue_billed')
     month = models.DateField()  # Always use first day of month (e.g., 2025-03-01)
