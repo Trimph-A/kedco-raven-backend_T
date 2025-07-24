@@ -67,6 +67,10 @@ class StaffSummaryView(APIView):
 
         def calculate_percentage_change(current, previous):
             """Calculate percentage change between current and previous values"""
+            # Convert to float to avoid Decimal/float mixing issues
+            current = float(current or 0)
+            previous = float(previous or 0)
+            
             if previous == 0:
                 return 100.0 if current > 0 else 0.0
             return round(((current - previous) / previous) * 100, 2)
@@ -74,107 +78,194 @@ class StaffSummaryView(APIView):
         # Date filter based on Ribbon
         from_date, to_date = get_month_range_from_request(request)
         
-        # Previous month dates for delta calculations
-        prev_month_start = from_date - relativedelta(months=1)
-        prev_month_end = (prev_month_start + relativedelta(months=1) - relativedelta(days=1))
-        
         # Get filtering parameters
         state_filter = request.GET.get('state')  # 'all' for all states, specific state_name, or None
         district_filter = request.GET.get('district')  # 'all' for all districts, specific district_name, or None
         
-        # Base queryset for staff (current month)
-        current_staff_queryset = Staff.objects.filter(hire_date__lte=to_date)
+        # Check if we need deltas (only for single location, not for grouped data)
+        need_deltas = not (state_filter == 'all' or district_filter == 'all')
         
-        # Base queryset for staff (previous month)
-        previous_staff_queryset = Staff.objects.filter(hire_date__lte=prev_month_end)
+        # For specific state, we always need deltas for collections_per_staff
+        if state_filter and state_filter != 'all' and district_filter != 'all':
+            need_deltas = True
+        
+        # Previous month dates for delta calculations (only if needed)
+        if need_deltas:
+            prev_month_start = from_date - relativedelta(months=1)
+            prev_month_end = (prev_month_start + relativedelta(months=1) - relativedelta(days=1))
+        
+        # Base queryset for staff (current month) - with optimizations
+        current_staff_queryset = Staff.objects.select_related(
+            'district__state',
+            'department'
+        ).filter(hire_date__lte=to_date)
+        
+        # Base queryset for staff (previous month) - only if deltas needed
+        if need_deltas:
+            previous_staff_queryset = Staff.objects.select_related(
+                'district__state',
+                'department'
+            ).filter(hire_date__lte=prev_month_end)
         
         # Apply state filtering to both querysets
         if state_filter and state_filter != 'all':
-            current_staff_queryset = current_staff_queryset.filter(business_district__state__name=state_filter)
-            previous_staff_queryset = previous_staff_queryset.filter(business_district__state__name=state_filter)
+            current_staff_queryset = current_staff_queryset.filter(district__state__name=state_filter)
+            if need_deltas:
+                previous_staff_queryset = previous_staff_queryset.filter(district__state__name=state_filter)
         
         # Apply district filtering to both querysets
         if district_filter and district_filter != 'all':
-            current_staff_queryset = current_staff_queryset.filter(business_district__name=district_filter)
-            previous_staff_queryset = previous_staff_queryset.filter(business_district__name=district_filter)
+            current_staff_queryset = current_staff_queryset.filter(district__name=district_filter)
+            if need_deltas:
+                previous_staff_queryset = previous_staff_queryset.filter(district__name=district_filter)
 
-        # Current month metrics
-        current_total_count = current_staff_queryset.count()
-        current_avg_salary = current_staff_queryset.aggregate(avg_salary=Avg("salary"))["avg_salary"] or 0
+        # Current month metrics - combined aggregation for better performance
+        current_metrics = current_staff_queryset.aggregate(
+            total_count=Count('id'),
+            avg_salary=Avg('salary'),
+            retained_count=Count('id', filter=Q(exit_date__isnull=True)),
+            exited_count=Count('id', filter=Q(exit_date__isnull=False))
+        )
         
-        # Current age calculation
-        current_ages = [calculate_age(staff.birth_date) for staff in current_staff_queryset if staff.birth_date]
-        current_avg_age = round(sum(current_ages) / len(current_ages)) if current_ages else 0
-        
-        # Current retention & turnover
-        current_retained_count = current_staff_queryset.filter(exit_date__isnull=True).count()
-        current_exited_count = current_staff_queryset.filter(exit_date__isnull=False).count()
+        current_total_count = current_metrics['total_count']
+        current_avg_salary = current_metrics['avg_salary'] or 0
+        current_retained_count = current_metrics['retained_count']
+        current_exited_count = current_metrics['exited_count']
         current_retention_rate = (current_retained_count / current_total_count * 100) if current_total_count else 0
         current_turnover_rate = (current_exited_count / current_total_count * 100) if current_total_count else 0
-
-        # Previous month metrics
-        previous_total_count = previous_staff_queryset.count()
-        previous_avg_salary = previous_staff_queryset.aggregate(avg_salary=Avg("salary"))["avg_salary"] or 0
         
-        # Previous age calculation
-        previous_ages = [calculate_age(staff.birth_date) for staff in previous_staff_queryset if staff.birth_date]
-        previous_avg_age = round(sum(previous_ages) / len(previous_ages)) if previous_ages else 0
-        
-        # Previous retention & turnover
-        previous_retained_count = previous_staff_queryset.filter(exit_date__isnull=True).count()
-        previous_exited_count = previous_staff_queryset.filter(exit_date__isnull=False).count()
-        previous_retention_rate = (previous_retained_count / previous_total_count * 100) if previous_total_count else 0
-        previous_turnover_rate = (previous_exited_count / previous_total_count * 100) if previous_total_count else 0
+        # Current age calculation - fetch only needed fields
+        current_ages = list(current_staff_queryset.filter(
+            birth_date__isnull=False
+        ).values_list('birth_date', flat=True))
+        current_avg_age = round(sum(calculate_age(birth_date) for birth_date in current_ages) / len(current_ages)) if current_ages else 0
 
-        # Calculate deltas
-        total_staff_delta = calculate_percentage_change(current_total_count, previous_total_count)
-        avg_salary_delta = calculate_percentage_change(current_avg_salary, previous_avg_salary)
-        avg_age_delta = calculate_percentage_change(current_avg_age, previous_avg_age)
-        retention_rate_delta = calculate_percentage_change(current_retention_rate, previous_retention_rate)
-        turnover_rate_delta = calculate_percentage_change(current_turnover_rate, previous_turnover_rate)
+        # Previous month metrics - only if deltas needed
+        if need_deltas:
+            previous_metrics = previous_staff_queryset.aggregate(
+                total_count=Count('id'),
+                avg_salary=Avg('salary'),
+                retained_count=Count('id', filter=Q(exit_date__isnull=True)),
+                exited_count=Count('id', filter=Q(exit_date__isnull=False))
+            )
+            
+            previous_total_count = previous_metrics['total_count']
+            previous_avg_salary = previous_metrics['avg_salary'] or 0
+            previous_retained_count = previous_metrics['retained_count']
+            previous_exited_count = previous_metrics['exited_count']
+            previous_retention_rate = (previous_retained_count / previous_total_count * 100) if previous_total_count else 0
+            previous_turnover_rate = (previous_exited_count / previous_total_count * 100) if previous_total_count else 0
 
-        # Distribution and gender split (using current month data)
+            # Previous age calculation
+            previous_ages = list(previous_staff_queryset.filter(
+                birth_date__isnull=False
+            ).values_list('birth_date', flat=True))
+            previous_avg_age = round(sum(calculate_age(birth_date) for birth_date in previous_ages) / len(previous_ages)) if previous_ages else 0
+
+            # Calculate deltas
+            total_staff_delta = calculate_percentage_change(current_total_count, previous_total_count)
+            avg_salary_delta = calculate_percentage_change(current_avg_salary, previous_avg_salary)
+            avg_age_delta = calculate_percentage_change(current_avg_age, previous_avg_age)
+            retention_rate_delta = calculate_percentage_change(current_retention_rate, previous_retention_rate)
+            turnover_rate_delta = calculate_percentage_change(current_turnover_rate, previous_turnover_rate)
+        else:
+            # No deltas for grouped data
+            total_staff_delta = avg_salary_delta = avg_age_delta = retention_rate_delta = turnover_rate_delta = None
+
+        # Distribution and gender split (using current month data) - optimized
         distribution = current_staff_queryset.values("department__name").annotate(count=Count("id"))
         gender_split = current_staff_queryset.values("gender").annotate(count=Count("id"))
 
         # Collections per staff calculations
-        collections_data = self.calculate_collections_per_staff(
-            from_date, to_date, prev_month_start, prev_month_end, state_filter, district_filter
-        )
+        if state_filter == 'all':
+            # For state=all, only get current month collections (no yearly data)
+            collections_data = self.calculate_collections_per_staff_grouped_by_state(
+                from_date, to_date, district_filter
+            )
+        elif district_filter == 'all' and state_filter and state_filter != 'all':
+            # For specific state with all districts, get district-level data
+            collections_data = self.calculate_collections_per_staff_grouped_by_district(
+                from_date, to_date, state_filter
+            )
+        else:
+            # For single location or specific state, get both current month and yearly data
+            collections_data = self.calculate_collections_per_staff(
+                from_date, to_date, 
+                prev_month_start if need_deltas else None, 
+                prev_month_end if need_deltas else None, 
+                state_filter, district_filter, need_deltas
+            )
 
-        response_data = {
-            "total_staff": {
-                "value": current_total_count,
-                "delta": total_staff_delta
-            },
-            "avg_salary": {
-                "value": round(current_avg_salary),
-                "delta": avg_salary_delta
-            },
-            "avg_age": {
-                "value": current_avg_age,
-                "delta": avg_age_delta
-            },
-            "retention_rate": {
-                "value": round(current_retention_rate, 2),
-                "delta": retention_rate_delta
-            },
-            "turnover_rate": {
-                "value": round(current_turnover_rate, 2),
-                "delta": turnover_rate_delta
-            },
-            "distribution": distribution,
-            "gender_split": gender_split,
-            **collections_data  # Merge collections data (includes its own delta)
-        }
+        # Build response based on filtering type
+        if state_filter == 'all':
+            # Special response structure for state=all
+            response_data = {
+                "states": self.get_state_specific_data(current_staff_queryset, collections_data),
+            }
+        elif district_filter == 'all' and state_filter and state_filter != 'all':
+            # All districts under a specific state
+            response_data = {
+                "districts": self.get_district_specific_data(current_staff_queryset, collections_data, state_filter),
+            }
+        elif state_filter and state_filter != 'all':
+            # Specific state response - only collections data + state metrics
+            response_data = {
+                "collections_per_staff_current": collections_data["collections_per_staff_current"],
+                "collections_per_staff_yearly": collections_data["collections_per_staff_yearly"],
+                "staff_distribution": list(distribution),
+                "retention_rate": round(current_retention_rate, 2),
+                "turnover_rate": round(current_turnover_rate, 2),
+                "gender_distribution": list(gender_split)
+            }
+        elif need_deltas:
+            # Single location with full metrics and deltas
+            response_data = {
+                "total_staff": {
+                    "value": current_total_count,
+                    "delta": total_staff_delta
+                },
+                "avg_salary": {
+                    "value": round(current_avg_salary),
+                    "delta": avg_salary_delta
+                },
+                "avg_age": {
+                    "value": current_avg_age,
+                    "delta": avg_age_delta
+                },
+                "retention_rate": {
+                    "value": round(current_retention_rate, 2),
+                    "delta": retention_rate_delta
+                },
+                "turnover_rate": {
+                    "value": round(current_turnover_rate, 2),
+                    "delta": turnover_rate_delta
+                },
+                "distribution": distribution,
+                "gender_split": gender_split,
+                **collections_data
+            }
+        else:
+            # Simplified response without deltas for other grouped data
+            response_data = {
+                "total_staff": current_total_count,
+                "avg_salary": round(current_avg_salary),
+                "avg_age": current_avg_age,
+                "retention_rate": round(current_retention_rate, 2),
+                "turnover_rate": round(current_turnover_rate, 2),
+                "distribution": distribution,
+                "gender_split": gender_split,
+                **collections_data
+            }
 
         return Response(response_data)
 
-    def calculate_collections_per_staff(self, from_date, to_date, prev_month_start, prev_month_end, state_filter, district_filter):
-        """Calculate collections per staff for selected month and yearly trend with delta"""
+    def calculate_collections_per_staff(self, from_date, to_date, prev_month_start, prev_month_end, state_filter, district_filter, need_deltas):
+        """Calculate collections per staff for selected month and yearly trend with optional delta"""
         
-        # Get sales reps (they are the ones who collect)
-        sales_reps_queryset = SalesRepresentative.objects.all()
+        # Get sales reps (they are the ones who collect) - with optimizations
+        sales_reps_queryset = SalesRepresentative.objects.prefetch_related(
+            'assigned_transformers__feeder__business_district__state'
+        )
         
         # Apply state filtering to sales reps
         if state_filter and state_filter != 'all':
@@ -193,46 +284,23 @@ class StaffSummaryView(APIView):
             from_date, to_date, sales_reps_queryset, state_filter, district_filter
         )
         
-        # Previous month collections per staff for delta calculation
-        previous_month_collections = self.get_monthly_collections_per_staff(
-            prev_month_start, prev_month_end, sales_reps_queryset, state_filter, district_filter
-        )
-
-        # Calculate delta for collections per staff
-        def calculate_collections_delta(current_data, previous_data):
-            if isinstance(current_data, dict) and 'collections_per_staff' in current_data:
-                current_value = current_data['collections_per_staff']
-                previous_value = previous_data.get('collections_per_staff', 0) if isinstance(previous_data, dict) else 0
-            else:
-                current_value = current_data
-                previous_value = previous_data
+        # Previous month collections per staff for delta calculation (only if needed)
+        if need_deltas and prev_month_start and prev_month_end:
+            previous_month_collections = self.get_monthly_collections_per_staff(
+                prev_month_start, prev_month_end, sales_reps_queryset, state_filter, district_filter
+            )
             
-            if previous_value == 0:
-                return 100.0 if current_value > 0 else 0.0
-            return round(((current_value - previous_value) / previous_value) * 100, 2)
-
-        # Add delta to current month collections
-        if isinstance(current_month_collections, dict) and not any(key in current_month_collections for key in ['total_collections', 'states', 'districts']):
-            # Single location case
-            delta = calculate_collections_delta(current_month_collections, previous_month_collections)
-            current_month_collections = {
-                **current_month_collections,
-                'delta': delta
-            }
-        elif isinstance(current_month_collections, dict):
-            # Multiple locations case - add delta to each location
-            updated_collections = {}
-            for location, data in current_month_collections.items():
-                if isinstance(data, dict) and 'collections_per_staff' in data:
-                    prev_data = previous_month_collections.get(location, {})
-                    delta = calculate_collections_delta(data, prev_data)
-                    updated_collections[location] = {
-                        **data,
-                        'delta': delta
-                    }
+            # Add delta for single location case only
+            if isinstance(current_month_collections, dict) and 'collections_per_staff' in current_month_collections:
+                current_value = float(current_month_collections['collections_per_staff'])
+                previous_value = float(previous_month_collections.get('collections_per_staff', 0)) if isinstance(previous_month_collections, dict) else 0.0
+                
+                if previous_value == 0:
+                    delta = 100.0 if current_value > 0 else 0.0
                 else:
-                    updated_collections[location] = data
-            current_month_collections = updated_collections
+                    delta = round(((current_value - previous_value) / previous_value) * 100, 2)
+                
+                current_month_collections['delta'] = delta
 
         # Yearly collections per staff (all months in the selected year)
         yearly_collections = self.get_yearly_collections_per_staff(
@@ -243,6 +311,148 @@ class StaffSummaryView(APIView):
             "collections_per_staff_current": current_month_collections,
             "collections_per_staff_yearly": yearly_collections
         }
+
+    def calculate_collections_per_staff_grouped_by_state(self, from_date, to_date, district_filter):
+        """Calculate collections per staff for each state (current month only)"""
+        
+        states = State.objects.all()
+        result = {}
+        
+        for state in states:
+            # Get sales reps for this state
+            state_sales_reps = SalesRepresentative.objects.prefetch_related(
+                'assigned_transformers__feeder__business_district'
+            ).filter(
+                assigned_transformers__feeder__business_district__state=state
+            ).distinct()
+            
+            # Apply district filtering if specified
+            if district_filter and district_filter != 'all':
+                state_sales_reps = state_sales_reps.filter(
+                    assigned_transformers__feeder__business_district__name=district_filter
+                ).distinct()
+            
+            # Calculate collections for this state
+            state_collections = self._calculate_monthly_collections(
+                from_date, to_date, state_sales_reps, state.name, district_filter
+            )
+            
+            result[state.name] = state_collections["per_staff"]
+        
+        return {"collections_per_staff_by_state": result}
+
+    def get_state_specific_data(self, staff_queryset, collections_data):
+        """Get state-specific retention, turnover, and distribution data"""
+        
+        states_data = {}
+        states = State.objects.all()
+        
+        for state in states:
+            # Get staff for this state
+            state_staff = staff_queryset.filter(district__state=state)
+            
+            # Calculate metrics for this state
+            state_metrics = state_staff.aggregate(
+                total_count=Count('id'),
+                retained_count=Count('id', filter=Q(exit_date__isnull=True)),
+                exited_count=Count('id', filter=Q(exit_date__isnull=False))
+            )
+            
+            state_total = state_metrics['total_count']
+            state_retained = state_metrics['retained_count']
+            state_exited = state_metrics['exited_count']
+            
+            state_retention_rate = (state_retained / state_total * 100) if state_total else 0
+            state_turnover_rate = (state_exited / state_total * 100) if state_total else 0
+            
+            # Get department distribution for this state
+            state_distribution = state_staff.values("department__name").annotate(
+                count=Count("id")
+            )
+            
+            # Get gender distribution for this state
+            state_gender_split = state_staff.values("gender").annotate(
+                count=Count("id")
+            )
+            
+            # Get collections per staff for this state
+            collections_per_staff = collections_data.get("collections_per_staff_by_state", {}).get(state.name, 0)
+            
+            states_data[state.name] = {
+                "collections_per_staff": collections_per_staff,
+                "retention_rate": round(state_retention_rate, 2),
+                "turnover_rate": round(state_turnover_rate, 2),
+                "department_distribution": list(state_distribution),
+                "gender_distribution": list(state_gender_split)
+            }
+        
+    def calculate_collections_per_staff_grouped_by_district(self, from_date, to_date, state_filter):
+        """Calculate collections per staff for each district under a specific state (current month only)"""
+        
+        # Get districts under the specified state  
+        from hr.models import BusinessDistrict
+        districts = BusinessDistrict.objects.filter(state__name=state_filter)
+        result = {}
+        
+        for district in districts:
+            # Get sales reps for this district
+            district_sales_reps = SalesRepresentative.objects.prefetch_related(
+                'assigned_transformers__feeder__business_district'
+            ).filter(
+                assigned_transformers__feeder__business_district=district
+            ).distinct()
+            
+            # Calculate collections for this district
+            district_collections = self._calculate_monthly_collections(
+                from_date, to_date, district_sales_reps, state_filter, district.name
+            )
+            
+            result[district.name] = district_collections["per_staff"]
+        
+        return {"collections_per_staff_by_district": result}
+
+    def get_district_specific_data(self, staff_queryset, collections_data, state_filter):
+        """Get district-specific data for all districts under a state"""
+        
+        from hr.models import BusinessDistrict
+        districts_data = {}
+        districts = BusinessDistrict.objects.filter(state__name=state_filter)
+        
+        for district in districts:
+            # Get staff for this district
+            district_staff = staff_queryset.filter(district=district)
+            
+            # Calculate metrics for this district
+            district_metrics = district_staff.aggregate(
+                total_count=Count('id'),
+                retained_count=Count('id', filter=Q(exit_date__isnull=True)),
+                exited_count=Count('id', filter=Q(exit_date__isnull=False))
+            )
+            
+            district_total = district_metrics['total_count']
+            district_retained = district_metrics['retained_count']
+            district_exited = district_metrics['exited_count']
+            
+            district_retention_rate = (district_retained / district_total * 100) if district_total else 0
+            district_turnover_rate = (district_exited / district_total * 100) if district_total else 0
+            
+            # Get gender distribution for this district
+            district_gender_split = district_staff.values("gender").annotate(
+                count=Count("id")
+            )
+            
+            # Get collections per staff for this district
+            collections_per_staff = collections_data.get("collections_per_staff_by_district", {}).get(district.name, 0)
+            
+            districts_data[district.name] = {
+                "collections_per_staff": collections_per_staff,
+                "staff_count": district_total,
+                "retention_rate": round(district_retention_rate, 2),
+                "turnover_rate": round(district_turnover_rate, 2),
+                "gender_distribution": list(district_gender_split)
+            }
+        
+        return districts_data
 
     def get_monthly_collections_per_staff(self, from_date, to_date, sales_reps_queryset, state_filter, district_filter):
         """Get collections per staff for the selected month"""
@@ -387,15 +597,16 @@ class StaffSummaryView(APIView):
         )
         
         # Apply additional filtering if needed
-        if state_filter and state_filter != 'all':
-            collections_queryset = collections_queryset.filter(
-                distribution_transformer__feeder__business_district__state__name=state_filter
-            )
-        
-        if district_filter and district_filter != 'all':
-            collections_queryset = collections_queryset.filter(
-                distribution_transformer__feeder__business_district__name=district_filter
-            )
+        # Note: DailyCollection filtering removed since distribution_transformer field may not exist yet
+        # if state_filter and state_filter != 'all':
+        #     collections_queryset = collections_queryset.filter(
+        #         distribution_transformer__feeder__business_district__state__name=state_filter
+        #     )
+        # 
+        # if district_filter and district_filter != 'all':
+        #     collections_queryset = collections_queryset.filter(
+        #         distribution_transformer__feeder__business_district__name=district_filter
+        #     )
         
         total_collections = collections_queryset.aggregate(
             total=Sum('amount')
@@ -409,126 +620,27 @@ class StaffSummaryView(APIView):
         
         if state_filter and state_filter != 'all':
             monthly_summary_queryset = monthly_summary_queryset.filter(
-                distribution_transformer__feeder__business_district__state__name=state_filter
-            )
+                sales_rep__assigned_transformers__feeder__business_district__state__name=state_filter
+            ).distinct()
         
         if district_filter and district_filter != 'all':
             monthly_summary_queryset = monthly_summary_queryset.filter(
-                distribution_transformer__feeder__business_district__name=district_filter
-            )
+                sales_rep__assigned_transformers__feeder__business_district__name=district_filter
+            ).distinct()
         
         summary_collections = monthly_summary_queryset.aggregate(
             total=Sum('revenue_collected')
         )['total'] or 0
         
         # Use the higher of the two collection amounts (to avoid double counting)
-        total_collections = max(total_collections, summary_collections)
+        # Convert to float to avoid Decimal/float mixing
+        total_collections = float(max(total_collections, summary_collections))
         
         sales_reps_count = sales_reps_queryset.count()
-        collections_per_staff = round(total_collections / sales_reps_count, 2) if sales_reps_count > 0 else 0
+        collections_per_staff = round(total_collections / sales_reps_count, 2) if sales_reps_count > 0 else 0.0
         
         return {
-            "total": float(total_collections),
+            "total": total_collections,
             "count": sales_reps_count,
             "per_staff": collections_per_staff
         }
-
-
-class StaffStateOverviewView(APIView):
-    def get(self, request):
-        from_date, to_date = get_month_range_from_request(request)
-
-        states = State.objects.all()
-        results = []
-
-        for state in states:
-            staff_qs = Staff.objects.filter(state=state, hire_date__lte=to_date)
-            active_staff = staff_qs.filter(Q(exit_date__isnull=True) | Q(exit_date__gt=to_date))
-            exited_staff = staff_qs.filter(exit_date__range=(from_date, to_date))
-
-            total_staff = staff_qs.count()
-            active_count = active_staff.count()
-            exited_count = exited_staff.count()
-
-            # Retention & Turnover
-            retention_rate = round((active_count / total_staff) * 100, 2) if total_staff else 0
-            turnover_rate = round((exited_count / total_staff) * 100, 2) if total_staff else 0
-
-            # Collections per staff
-
-            # total_collection = DailyCollection.objects.filter(
-            #     sales_rep__assigned_feeders__substation__district__state__name=state,
-            #     date__range=(from_date, to_date)
-            # ).aggregate(total=Sum('amount'))['total'] or 0
-
-            total_collection = MonthlyCommercialSummary.objects.filter(
-                sales_rep__assigned_feeders__business_district__state__name=state,
-                month__range=(from_date, to_date)
-            ).aggregate(total=Sum('revenue_collected'))['total'] or 0
-
-
-            collections_per_staff = round(total_collection / active_count) if active_count else 0
-
-            # Gender distribution
-            gender_dist = (
-                staff_qs.values('gender')
-                .annotate(count=Count('id'))
-                .order_by('gender')
-            )
-
-            # Department distribution
-            dept_dist = (
-                staff_qs.values("department__name")
-                .annotate(count=Count("id"))
-                .order_by("department__name")
-            )
-
-            results.append({
-                "state": state.name,
-                "slug": state.slug,
-                "retention_rate": retention_rate,
-                "turnover_rate": turnover_rate,
-                "collections_per_staff": collections_per_staff,
-                "gender_distribution": gender_dist,
-                "department_distribution": dept_dist,
-            })
-
-        return Response(results)
-
-
-class StaffStateDetailView(APIView):
-    def get(self, request, slug):
-        from_date, to_date = get_month_range_from_request(request)
-        state = get_object_or_404(State, slug=slug)
-
-        staff_qs = Staff.objects.filter(state=state, hire_date__lte=to_date)
-        active_staff = staff_qs.filter(Q(exit_date__isnull=True) | Q(exit_date__gt=to_date))
-        exited_staff = staff_qs.filter(exit_date__range=(from_date, to_date))
-
-        total_staff = staff_qs.count()
-        active_count = active_staff.count()
-        exited_count = exited_staff.count()
-
-        retention_rate = round((active_count / total_staff) * 100, 2) if total_staff else 0
-        turnover_rate = round((exited_count / total_staff) * 100, 2) if total_staff else 0
-
-        total_collection = DailyCollection.objects.filter(
-            district__state=state,
-            date__range=(from_date, to_date)
-        ).aggregate(total=Sum('amount'))['total'] or 0
-
-        collections_per_staff = round(total_collection / active_count) if active_count else 0
-
-        gender_split = staff_qs.values("gender").annotate(count=Count("id"))
-        department_split = staff_qs.values("department__name").annotate(count=Count("id"))
-
-        return Response({
-            "state": state.name,
-            "slug": state.slug,
-            "total_staff": total_staff,
-            "collections_per_staff": collections_per_staff,
-            "retention_rate": retention_rate,
-            "turnover_rate": turnover_rate,
-            "gender_distribution": gender_split,
-            "department_distribution": department_split
-        })
