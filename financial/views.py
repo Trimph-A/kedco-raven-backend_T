@@ -17,6 +17,7 @@ from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
+from rest_framework.decorators import action
 
 from .models import *
 from .serializers import *
@@ -68,6 +69,18 @@ class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Opex.objects.all()
         return self.filter_by_location(qs)
+    
+    @action(detail=False, methods=['post'], url_path='upsert-external')
+    def upsert_external(self, request):
+        external_id = request.data.get("external_id")
+        if not external_id:
+            return Response({"error": "external_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        instance = Opex.objects.filter(external_id=external_id).first()
+        serializer = self.get_serializer(instance, data=request.data, partial=bool(instance))
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK if instance else status.HTTP_201_CREATED)
 
 class GLBreakdownViewSet(viewsets.ModelViewSet):
     queryset = GLBreakdown.objects.all()

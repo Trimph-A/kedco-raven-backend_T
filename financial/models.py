@@ -18,6 +18,13 @@ class GLBreakdown(UUIDModel, models.Model):
 
 
 class Opex(UUIDModel, models.Model):
+    external_id = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="External identifier from DataNest"
+    )
     district = models.ForeignKey(
         BusinessDistrict,
         on_delete=models.CASCADE,
