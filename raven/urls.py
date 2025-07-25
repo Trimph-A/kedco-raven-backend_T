@@ -21,7 +21,6 @@ from common.views import *
 from commercial.views import (
     CustomerViewSet,
     DailyEnergyDeliveredViewSet,
-    DailyRevenueCollectedViewSet,
     MonthlyRevenueBilledViewSet,
     MonthlyEnergyBilledViewSet,
     MonthlyCustomerStatsViewSet,
@@ -72,7 +71,6 @@ from financial.views import (
     financial_feeder_view,
     sales_rep_performance_view,
     list_sales_reps,
-    sales_rep_global_summary_view,
     FinancialAllStatesView,
     FinancialAllBusinessDistrictsView,
     FinancialServiceBandMetricsView,
@@ -92,7 +90,7 @@ from regulatory.views import (
 )
 
 from hr.views import DepartmentViewSet, RoleViewSet, StaffViewSet
-from hr.views import HRMetricsSummaryView, StaffSummaryView, StaffStateOverviewView, StaffStateDetailView
+from hr.views import StaffSummaryView
 
 
 
@@ -109,8 +107,8 @@ router.register(r'bands', BandViewSet)
 
 router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'daily-energy-delivered', DailyEnergyDeliveredViewSet, basename='daily-energy-delivered')
-router.register(r'daily-revenue-collected', DailyRevenueCollectedViewSet, basename='daily-revenue-collected')
-# router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+router.register(r'daily-collections', DailyCollectionViewSet, basename='daily-collections')
 router.register(r'monthly-energy-billed', MonthlyEnergyBilledViewSet, basename='monthly-energy-billed')
 router.register(r'monthly-customer-stats', MonthlyCustomerStatsViewSet, basename='monthly-customer-stats')
 
@@ -123,7 +121,6 @@ router.register(r'technical/hours-of-supply', DailyHoursOfSupplyViewSet, basenam
 
 router.register(r'financial/expense-categories', OpexCategoryViewSet, basename='expense-category')
 router.register(r'financial/expenses', OpexViewSet, basename='expense')
-router.register(r'financial/revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
 router.register(r'financial/gl-breakdowns', GLBreakdownViewSet, basename='gl-breakdown')
 router.register(r"financial/salary-payments", SalaryPaymentViewSet)
 
@@ -155,10 +152,8 @@ urlpatterns = [
     path('api/metrics/technical-monthly/', TechnicalMonthlySummaryView.as_view(), name='technical-monthly-summary'),
     path('api/metrics/financial-summary/', FinancialSummaryView.as_view(), name='financial-summary'),
     path('api/metrics/sales-rep-summary/', SalesRepMetricsView.as_view(), name='sales-rep-summary'),
-    path('api/metrics/hr-summary/', HRMetricsSummaryView.as_view(), name='hr-summary'),
+
     path('api/metrics/staff-summary/', StaffSummaryView.as_view(), name='staff-summary'),
-    path('api/metrics/staff/state-overview/', StaffStateOverviewView.as_view(), name='staff-state-overview'),
-    path("api/metrics/staff/state-overview/<slug:slug>/", StaffStateDetailView.as_view(), name="staff-state-detail"),
 
     path('api/metrics/commercial/overview/', CommercialOverviewAPIView.as_view(), name='commercial-overview'),
     path('api/metrics/commercial/all-states/',commercial_all_states_view, name='commercial-all-states-view'),
@@ -180,7 +175,6 @@ urlpatterns = [
     path("api/financial/feeder/", financial_feeder_view),
     path("api/financial/sales-reps/<uuid:rep_id>/performance/", sales_rep_performance_view),
     path("api/financial/sales-reps/", list_sales_reps),
-    path("api/financial/sales-reps/summary/", sales_rep_global_summary_view),
     path("api/financial/all-states-metrics/", FinancialAllStatesView.as_view(), name="financial-all-states"),
     path("api/financial/all-business-districts-metrics/", FinancialAllBusinessDistrictsView.as_view(), name="financial-business-districts"),
     path("api/financial/service-band-financial-metrics/", FinancialServiceBandMetricsView.as_view(), name="service-band-financial"),

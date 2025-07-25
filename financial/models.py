@@ -1,3 +1,4 @@
+# financial/models.py
 from django.db import models
 from common.models import UUIDModel, Feeder, BusinessDistrict, DistributionTransformer, Band
 from hr.models import Staff
@@ -32,6 +33,9 @@ class Opex(UUIDModel, models.Model):
         max_length=200,
         help_text="Who was paid"
     )
+    # i jsut added this enetity 
+    transaction_id = models.PositiveIntegerField(unique=True, help_text="Transaction ID")
+
     gl_account_number = models.CharField(
         max_length=20,
         help_text="General ledger account number"

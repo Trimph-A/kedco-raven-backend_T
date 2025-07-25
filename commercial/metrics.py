@@ -10,10 +10,11 @@ def calculate_derived_metrics(request):
     feeders = get_filtered_feeders(request)
 
     # Aggregate all relevant data
-    revenue_collected = DailyRevenueCollected.objects.filter(
-        feeder__in=feeders,
-        date__range=(date_from, date_to)
-    ).aggregate(total=Sum('amount'))['total'] or 0
+    # revenue_collected = DailyRevenueCollected.objects.filter(
+    #     feeder__in=feeders,
+    #     date__range=(date_from, date_to)
+    # ).aggregate(total=Sum('amount'))['total'] or 0
+    revenue_collected=0
 
     revenue_billed = MonthlyRevenueBilled.objects.filter(
         feeder__in=feeders,

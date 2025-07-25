@@ -1,3 +1,4 @@
+# commercial/models.py
 from django.db import models
 from common.models import UUIDModel, DistributionTransformer, Band, Feeder
 from django.utils import timezone
@@ -35,23 +36,6 @@ class DailyEnergyDelivered(UUIDModel, models.Model):
     class Meta:
         unique_together = ('feeder', 'date')
 
-
-class DailyRevenueCollected(UUIDModel, models.Model):
-    feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE)
-    date = models.DateField()
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
-
-    class Meta:
-        unique_together = ('feeder', 'date')
-
-
-class MonthlyRevenueBilled(UUIDModel, models.Model):
-    feeder = models.ForeignKey('common.Feeder', on_delete=models.CASCADE, related_name='commercial_monthly_revenue_billed')
-    month = models.DateField()  # Always use first day of month (e.g., 2025-03-01)
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
-
-    class Meta:
-        unique_together = ('feeder', 'month')
 
 
 class MonthlyEnergyBilled(UUIDModel, models.Model):
@@ -94,7 +78,19 @@ class SalesRepPerformance(UUIDModel, models.Model):
     active_accounts = models.PositiveIntegerField()
     suspended_accounts = models.PositiveIntegerField()
 
+class MonthlyRevenueBilled(UUIDModel, models.Model):
+    sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    transformer = models.ForeignKey(DistributionTransformer, on_delete=models.CASCADE)
+    month = models.DateField()  # Always use first day of month (e.g., 2025-03-01)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
 
+    class Meta:
+        unique_together = ('sales_rep', 'transformer', 'month')
+        ordering = ['-month', 'sales_rep', 'transformer']
+
+    def __str__(self):
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.month.strftime('%Y-%m')} - ₦{self.amount}"
+    
 class DailyCollection(UUIDModel, models.Model):
     COLLECTION_TYPE_CHOICES = (
         ('Prepaid', 'Prepaid'),
@@ -112,6 +108,7 @@ class DailyCollection(UUIDModel, models.Model):
     ]
 
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    transformer = models.ForeignKey(DistributionTransformer, on_delete=models.CASCADE)
     date = models.DateField()
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     collection_type = models.CharField(max_length=10, choices=COLLECTION_TYPE_CHOICES)
@@ -122,9 +119,17 @@ class DailyCollection(UUIDModel, models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        unique_together = ("sales_rep", "transformer", "date", "collection_type", "vendor_name")
+        ordering = ['-date', 'sales_rep', 'transformer']
+
+    def __str__(self):
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.date} - ₦{self.amount}"
+
 
 class MonthlyCommercialSummary(UUIDModel):
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    transformer = models.ForeignKey(DistributionTransformer, on_delete=models.CASCADE)
     month = models.DateField()
 
     customers_billed = models.PositiveIntegerField(default=0)
@@ -136,4 +141,7 @@ class MonthlyCommercialSummary(UUIDModel):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("sales_rep", "month")
+        unique_together = ("sales_rep", "transformer", "month")
+
+    def __str__(self):
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.month.strftime('%Y-%m')}"
