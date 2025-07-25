@@ -31,7 +31,6 @@ from commercial.views import (
     DailyCollectionViewSet,
     OverviewAPIView,
 
-    CommercialMetricsSummaryView,
     CommercialOverviewAPIView,
     commercial_all_states_view,
     commercial_state_metrics_view,
@@ -147,7 +146,6 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api/overview/', OverviewAPIView.as_view(), name='overview'),
     path('api/metrics/feeder/', FeederMetricsView.as_view(), name='feeder-metrics'),
-    path('api/metrics/commercial-summary/', CommercialMetricsSummaryView.as_view(), name='commercial-summary'),
     path('api/metrics/technical-summary/', TechnicalMetricsView.as_view(), name='technical-summary'),
     path('api/metrics/technical-monthly/', TechnicalMonthlySummaryView.as_view(), name='technical-monthly-summary'),
     path('api/metrics/financial-summary/', FinancialSummaryView.as_view(), name='financial-summary'),

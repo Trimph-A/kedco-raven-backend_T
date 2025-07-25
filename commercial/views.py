@@ -27,7 +27,6 @@ from commercial.date_filters import get_date_range_from_request
 from commercial.mixins import FeederFilteredQuerySetMixin
 from commercial.utils import get_filtered_customers
 from commercial.metrics import (
-    calculate_derived_metrics,
     get_sales_rep_performance_summary
 )
 from commercial.analytics import get_commercial_overview_data
@@ -356,14 +355,7 @@ class FeederMetricsView(APIView):
         elif bottom_n:
             metrics = metrics[-int(bottom_n):]
 
-        return Response(metrics)
-
-
-class CommercialMetricsSummaryView(APIView):
-    def get(self, request):
-        metrics = calculate_derived_metrics(request)
-        return Response(metrics)
-    
+        return Response(metrics)    
 
 
 class SalesRepresentativeViewSet(viewsets.ModelViewSet):
