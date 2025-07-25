@@ -14,7 +14,6 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from common.mixins import DistrictLocationFilterMixin
-from common.models import State, BusinessDistrict
 
 from django.db.models import Sum
 from django.utils.timezone import now
@@ -29,31 +28,30 @@ from commercial.models import SalesRepresentative
 from django.db.models import Count
 from datetime import datetime, timedelta
 from rest_framework import status
-from rest_framework.decorators import action
-from django.shortcuts import get_object_or_404
-from django.db import transaction
 from commercial.serializers import SalesRepresentativeSerializer
+from rest_framework.decorators import action
+from django.db import transaction
 from common.models import BusinessDistrict as District
 
 
 
-class ExpenseCategoryViewSet(viewsets.ModelViewSet):
-    queryset = ExpenseCategory.objects.all()
-    serializer_class = ExpenseCategorySerializer
+class OpexCategoryViewSet(viewsets.ModelViewSet):
+    queryset = OpexCategory.objects.all()
+    serializer_class = OpexCategorySerializer
 
 
-# class ExpenseViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
+# class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
 #     # queryset = Expense.objects.all()
-#     serializer_class = ExpenseSerializer
+#     serializer_class = OpexSerializer
 #     filter_backends = [DjangoFilterBackend]
 #     filterset_fields = {'district', 'gl_breakdown', 'opex_category', 'date'}
 
 #     def get_queryset(self):
-#         qs = Expense.objects.all()
+#         qs = Opex.objects.all()
 #         return self.filter_by_location(qs)
 
 class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
-    # queryset = Expense.objects.all()
+    queryset = Opex.objects.all()
     serializer_class = OpexSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = {'district', 'gl_breakdown', 'opex_category', 'date'}
@@ -62,416 +60,319 @@ class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
         qs = Opex.objects.all()
         return self.filter_by_location(qs)
 
-    def get_object(self):
+    def resolve_district_slug_to_uuid(self, district_slug):
         """
-        Override to handle composite key lookups for UPDATE/DELETE operations
+        Treat incoming 'district' value as the slug (e.g. 'JG-NT'),
+        look it up in District.slug, and return its PK.
         """
-        queryset = self.get_queryset()
-        
-        # Check if this is a composite key lookup (from sync operations)
-        if hasattr(self.request, 'data') and '_composite_key' in self.request.data:
-            composite_key = self.request.data['_composite_key']
-            return get_object_or_404(
-                queryset,
-                district=composite_key['district'],
-                date=composite_key['date'],
-                purpose=composite_key['purpose']
-            )
-        
-        # For URL-based lookups (traditional REST), try to use pk
-        if 'pk' in self.kwargs:
-            return get_object_or_404(queryset, pk=self.kwargs['pk'])
-        
-        # Fallback to first object (shouldn't happen in normal operations)
-        return queryset.first()
+        if not district_slug:
+            print("No district slug provided")
+            return None
 
-    def create(self, request, *args, **kwargs):
+        slug = district_slug.strip()
+        try:
+            district = District.objects.get(slug__iexact=slug)
+            print(f"District slug '{slug}' resolved to PK: {district.id}")
+            return district.id
+        except District.DoesNotExist:
+            print(f"District slug '{slug}' not found")
+            return None
+
+    def resolve_gl_breakdown_name_to_uuid(self, gl_breakdown_name):
         """
-        Handle INSERT operations with upsert logic for sync
+        Convert GL breakdown name to UUID, creating if it doesn't exist.
         """
-        data = request.data
+        if not gl_breakdown_name or gl_breakdown_name.strip() == '':
+            return None
+            
+        name = gl_breakdown_name.strip()
+        try:
+            gl_breakdown = GLBreakdown.objects.get(name__iexact=name)
+            print(f"GL breakdown '{name}' resolved to PK: {gl_breakdown.id}")
+            return gl_breakdown.id
+        except GLBreakdown.DoesNotExist:
+            # Create new GL breakdown if it doesn't exist
+            try:
+                gl_breakdown = GLBreakdown.objects.create(name=name)
+                print(f"Created new GL breakdown '{name}' with PK: {gl_breakdown.id}")
+                return gl_breakdown.id
+            except Exception as e:
+                print(f"Failed to create GL breakdown '{name}': {e}")
+                return None
+
+    def resolve_opex_category_name_to_uuid(self, opex_category_name):
+        """
+        Convert OPEX category name to UUID, creating if it doesn't exist.
+        """
+        if not opex_category_name or opex_category_name.strip() == '':
+            return None
+            
+        name = opex_category_name.strip()
+        try:
+            opex_category = OpexCategory.objects.get(name__iexact=name)
+            print(f"OPEX category '{name}' resolved to PK: {opex_category.id}")
+            return opex_category.id
+        except OpexCategory.DoesNotExist:
+            # Create new OPEX category if it doesn't exist
+            try:
+                opex_category = OpexCategory.objects.create(name=name)
+                print(f"Created new OPEX category '{name}' with PK: {opex_category.id}")
+                return opex_category.id
+            except Exception as e:
+                print(f"Failed to create OPEX category '{name}': {e}")
+                return None
+
+    def resolve_foreign_keys(self, opex_item):
+        """
+        Resolve all foreign key references from names to UUIDs.
+        """
+        resolved_data = opex_item.copy()
         
-        # Check if record already exists (upsert logic)
-        existing = self.get_queryset().filter(
-            district=data.get('district'),
-            date=data.get('date'),
-            purpose=data.get('purpose')
-        ).first()
+        # Resolve district
+        slug = opex_item.get('district')
+        district_pk = self.resolve_district_slug_to_uuid(slug)
+        if not district_pk:
+            raise ValueError(f"District slug '{slug}' could not be resolved")
+        resolved_data['district'] = district_pk
         
-        if existing:
-            # Update existing record
-            serializer = self.get_serializer(existing, data=data, partial=True)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
+        # Resolve GL breakdown
+        gl_breakdown_name = opex_item.get('gl_breakdown')
+        if gl_breakdown_name and gl_breakdown_name not in ['N/A', '']:
+            gl_breakdown_pk = self.resolve_gl_breakdown_name_to_uuid(gl_breakdown_name)
+            resolved_data['gl_breakdown'] = gl_breakdown_pk
         else:
-            # Create new record
-            serializer = self.get_serializer(data=data)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-    def update(self, request, *args, **kwargs):
-        """
-        Handle UPDATE operations using composite key
-        """
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
+            resolved_data['gl_breakdown'] = None
+            
+        # Resolve OPEX category
+        opex_category_name = opex_item.get('opex_category')
+        if opex_category_name and opex_category_name not in ['N/A', 'General', '']:
+            opex_category_pk = self.resolve_opex_category_name_to_uuid(opex_category_name)
+            resolved_data['opex_category'] = opex_category_pk
+        else:
+            # Create or get "General" category as default
+            opex_category_pk = self.resolve_opex_category_name_to_uuid('General')
+            resolved_data['opex_category'] = opex_category_pk
         
-        # Remove composite key from data before serialization
-        data = request.data.copy()
-        if '_composite_key' in data:
-            del data['_composite_key']
-        
-        serializer = self.get_serializer(instance, data=data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        
-        return Response(serializer.data)
-
-    def destroy(self, request, *args, **kwargs):
-        """
-        Handle DELETE operations using composite key
-        """
-        instance = self.get_object()
-        instance.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    def list(self, request, *args, **kwargs):
-        """
-        Enhanced list view with better filtering for sync operations
-        """
-        queryset = self.filter_queryset(self.get_queryset())
-        
-        # Add support for composite key filtering in list operations
-        district = request.query_params.get('district')
-        date = request.query_params.get('date')
-        purpose = request.query_params.get('purpose')
-        
-        if district and date and purpose:
-            queryset = queryset.filter(
-                district=district,
-                date=date,
-                purpose=purpose
-            )
-        
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        return resolved_data
 
     @action(detail=False, methods=['post'])
     def bulk_create(self, request):
-        """
-        Handle bulk INSERT operations for sync (like Excel uploads)
-        Expected payload: {"expenses": [expense1, expense2, ...]}
-        """
-        expenses_data = request.data.get('expenses', [])
-        print(f"🐍 Received {len(expenses_data)} expenses for bulk create")
+        opex_data = request.data.get('expenses', [])
+        print(f"Received {len(opex_data)} expenses for bulk create")
+        if not opex_data:
+            return Response({'error': 'No expense data provided'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not expenses_data:
-            return Response(
-                {'error': 'No expenses data provided'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        created_expenses = []
-        updated_expenses = []
-        errors = []
-
+        created, updated, errors = [], [], []
         with transaction.atomic():
-            for idx, expense_data in enumerate(expenses_data):
+            for idx, opex_item in enumerate(opex_data):
                 try:
-                    print(f"🐍 Processing expense {idx}: {expense_data}")
+                    print(f"Processing expense item {idx}: {opex_item}")
                     
-                    # 🆕 RESOLVE DISTRICT CODE TO UUID
-                    district_code = expense_data.get('district')
+                    # Normalize date to YYYY-MM-DD
+                    original_date = opex_item.get('date')
+                    if isinstance(opex_item.get('date'), str) and 'T' in opex_item['date']:
+                        opex_item['date'] = opex_item['date'].split('T')[0]
+                    print(f"Date normalized: {original_date} → {opex_item.get('date')}")
+
+                    # Search by district__slug + date + purpose + payee (unique combination)
+                    search_criteria = {
+                        'district__slug': opex_item.get('district'),
+                        'date': opex_item.get('date'),
+                        'purpose': opex_item.get('purpose', ''),
+                        'payee': opex_item.get('payee', '')
+                    }
+                    print(f"Looking for existing expense with: {search_criteria}")
+                    
+                    existing = self.get_queryset().filter(**search_criteria).first()
+                    print(f"Found existing record: {existing}")
+                    
+                    # Resolve all foreign key references
                     try:
-                        # Assuming your District model has a 'code' field
-                        district_obj = District.objects.get(code=district_code)
-                        expense_data['district'] = district_obj.id  # Use UUID
-                        print(f"🐍 ✅ Resolved district '{district_code}' to UUID: {district_obj.id}")
-                    except District.DoesNotExist:
-                        print(f"🐍 ❌ District not found: {district_code}")
-                        errors.append({
-                            'index': idx,
-                            'data': expense_data,
-                            'errors': f'District code "{district_code}" not found'
-                        })
+                        resolved_data = self.resolve_foreign_keys(opex_item)
+                        print(f"Resolved foreign keys: district={resolved_data.get('district')}, "
+                              f"gl_breakdown={resolved_data.get('gl_breakdown')}, "
+                              f"opex_category={resolved_data.get('opex_category')}")
+                    except ValueError as e:
+                        errors.append({'index': idx, 'data': opex_item, 'errors': str(e)})
                         continue
                     
-                    # Check if record exists (upsert logic) - now using UUID
-                    existing = self.get_queryset().filter(
-                        district=expense_data.get('district'),  # Now UUID
-                        date=expense_data.get('date'),
-                        purpose=expense_data.get('purpose')
-                    ).first()
-
                     if existing:
-                        print(f"🐍 Found existing record, updating...")
-                        serializer = self.get_serializer(existing, data=expense_data, partial=True)
+                        print(f"UPDATING existing expense ID: {existing.id}")
+                        serializer = self.get_serializer(existing, data=resolved_data, partial=True)
                         if serializer.is_valid():
-                            instance = serializer.save()
-                            print(f"🐍 ✅ Updated record with ID: {instance.id}")
-                            print(f"🐍 ✅ Updated data: {serializer.data}")
-                            updated_expenses.append(serializer.data)
+                            saved_instance = serializer.save()
+                            print(f"Successfully updated expense ID: {saved_instance.id}")
+                            updated.append(serializer.data)
                         else:
-                            print(f"🐍 ❌ Update validation failed: {serializer.errors}")
-                            errors.append({
-                                'index': idx,
-                                'data': expense_data,
-                                'errors': serializer.errors
-                            })
+                            print(f"Update validation failed: {serializer.errors}")
+                            errors.append({'index': idx, 'data': opex_item, 'errors': serializer.errors})
                     else:
-                        print(f"🐍 Creating new record...")
-                        serializer = self.get_serializer(data=expense_data)
+                        print(f"CREATING new expense record")
+                        serializer = self.get_serializer(data=resolved_data)
                         if serializer.is_valid():
-                            instance = serializer.save()
-                            print(f"🐍 ✅ Created record with ID: {instance.id}")
-                            print(f"🐍 ✅ Created data: {serializer.data}")
-                            created_expenses.append(serializer.data)
+                            saved_instance = serializer.save()
+                            print(f"Successfully created expense ID: {saved_instance.id}")
+                            created.append(serializer.data)
                         else:
-                            print(f"🐍 ❌ Create validation failed: {serializer.errors}")
-                            errors.append({
-                                'index': idx,
-                                'data': expense_data,
-                                'errors': serializer.errors
-                            })
-
+                            print(f"Create validation failed: {serializer.errors}")
+                            errors.append({'index': idx, 'data': opex_item, 'errors': serializer.errors})
                 except Exception as e:
-                    print(f"🐍 ❌ Exception processing expense {idx}: {str(e)}")
+                    print(f"Exception at {idx}: {e}")
                     import traceback
-                    print(f"🐍 ❌ Full traceback: {traceback.format_exc()}")
-                    errors.append({
-                        'index': idx,
-                        'data': expense_data,
-                        'errors': str(e)
-                    })
+                    print(f"Full traceback: {traceback.format_exc()}")
+                    errors.append({'index': idx, 'data': opex_item, 'errors': str(e)})
 
-        print(f"🐍 Final summary: Created {len(created_expenses)}, Updated {len(updated_expenses)}, Errors {len(errors)}")
-        
-        response_data = {
-            'created': len(created_expenses),
-            'updated': len(updated_expenses),
-            'errors': len(errors),
-            'created_data': created_expenses,
-            'updated_data': updated_expenses
-        }
-
+        print(f"Final results: Created={len(created)}, Updated={len(updated)}, Errors={len(errors)}")
+        response_data = {'created': len(created), 'updated': len(updated), 'errors': len(errors),
+                         'created_data': created, 'updated_data': updated}
         if errors:
             response_data['error_details'] = errors
-            print(f"🐍 ❌ Error details: {errors}")
-
         return Response(response_data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['patch'])
     def bulk_update(self, request):
-        """
-        Handle bulk UPDATE operations for sync
-        Expected payload: {"expenses": [expense1, expense2, ...]}
-        """
-        expenses_data = request.data.get('expenses', [])
-        print(f"🐍 Received {len(expenses_data)} expenses for bulk update")
-        
-        if not expenses_data:
-            return Response(
-                {'error': 'No expenses data provided'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        opex_data = request.data.get('expenses', [])
+        print(f"Received {len(opex_data)} expenses for bulk update")
+        if not opex_data:
+            return Response({'error': 'No expense data provided'}, status=status.HTTP_400_BAD_REQUEST)
 
-        updated_expenses = []
-        errors = []
-
+        updated, errors = [], []
         with transaction.atomic():
-            for idx, expense_data in enumerate(expenses_data):
+            for idx, opex_item in enumerate(opex_data):
                 try:
-                    print(f"🐍 Processing update expense {idx}: {expense_data}")
+                    print(f"Processing UPDATE expense item {idx}: {opex_item}")
                     
-                    # 🆕 RESOLVE DISTRICT CODE TO UUID
-                    district_code = None
-                    if '_composite_key' in expense_data:
-                        district_code = expense_data['_composite_key'].get('district')
-                    else:
-                        district_code = expense_data.get('district')
-                    
-                    try:
-                        district_obj = District.objects.get(code=district_code)
-                        district_uuid = district_obj.id
-                        print(f"🐍 ✅ Resolved district '{district_code}' to UUID: {district_uuid}")
-                    except District.DoesNotExist:
-                        print(f"🐍 ❌ District not found: {district_code}")
-                        errors.append({
-                            'index': idx,
-                            'data': expense_data,
-                            'errors': f'District code "{district_code}" not found'
-                        })
-                        continue
-                    
-                    # Find existing record using UUID
-                    if '_composite_key' in expense_data:
-                        composite_key = expense_data['_composite_key']
-                        existing = self.get_queryset().filter(
-                            district=district_uuid,  # Use UUID
-                            date=composite_key['date'],
-                            purpose=composite_key['purpose']
-                        ).first()
-                    else:
-                        existing = self.get_queryset().filter(
-                            district=district_uuid,  # Use UUID
-                            date=expense_data.get('date'),
-                            purpose=expense_data.get('purpose')
-                        ).first()
+                    # Normalize dates
+                    comp = opex_item.get('_composite_key', {})
+                    if comp and isinstance(comp.get('date'), str) and 'T' in comp['date']:
+                        comp['date'] = comp['date'].split('T')[0]
+                    if isinstance(opex_item.get('date'), str) and 'T' in opex_item['date']:
+                        opex_item['date'] = opex_item['date'].split('T')[0]
 
-                    if existing:
-                        # Remove composite key from data and update district with UUID
-                        clean_data = expense_data.copy()
-                        if '_composite_key' in clean_data:
-                            del clean_data['_composite_key']
-                        clean_data['district'] = district_uuid  # Set UUID
+                    # Search using district__slug (through FK relationship)
+                    if comp:
+                        search_criteria = {
+                            'district__slug': comp.get('district'),
+                            'date': comp.get('date'),
+                            'purpose': comp.get('purpose', ''),
+                            'payee': comp.get('payee', '')
+                        }
+                        print(f"UPDATE: Looking for existing expense with composite key: {search_criteria}")
+                        existing = self.get_queryset().filter(**search_criteria).first()
                         
-                        print(f"🐍 Found existing record for update, ID: {existing.id}")
-                        serializer = self.get_serializer(existing, data=clean_data, partial=True)
-                        if serializer.is_valid():
-                            instance = serializer.save()
-                            print(f"🐍 ✅ Updated record with ID: {instance.id}")
-                            print(f"🐍 ✅ Updated data: {serializer.data}")
-                            updated_expenses.append(serializer.data)
-                        else:
-                            print(f"🐍 ❌ Update validation failed: {serializer.errors}")
-                            errors.append({
-                                'index': idx,
-                                'data': expense_data,
-                                'errors': serializer.errors
-                            })
+                        # Use composite key data if available
+                        data_to_resolve = {**opex_item}
+                        data_to_resolve.update(comp)
+                        data_to_resolve.pop('_composite_key', None)
                     else:
-                        print(f"🐍 ❌ Record not found for update")
-                        errors.append({
-                            'index': idx,
-                            'data': expense_data,
-                            'errors': 'Record not found for update'
-                        })
+                        search_criteria = {
+                            'district__slug': opex_item.get('district'),
+                            'date': opex_item.get('date'),
+                            'purpose': opex_item.get('purpose', ''),
+                            'payee': opex_item.get('payee', '')
+                        }
+                        print(f"UPDATE: Looking for existing expense with direct fields: {search_criteria}")
+                        existing = self.get_queryset().filter(**search_criteria).first()
+                        data_to_resolve = opex_item
 
+                    print(f"UPDATE: Found existing record: {existing}")
+
+                    if not existing:
+                        print(f"UPDATE: Expense not found for update")
+                        errors.append({'index': idx, 'data': opex_item, 'errors': 'Expense not found for update'})
+                        continue
+
+                    # Resolve all foreign key references
+                    try:
+                        resolved_data = self.resolve_foreign_keys(data_to_resolve)
+                        print(f"UPDATE: Resolved foreign keys: district={resolved_data.get('district')}, "
+                              f"gl_breakdown={resolved_data.get('gl_breakdown')}, "
+                              f"opex_category={resolved_data.get('opex_category')}")
+                    except ValueError as e:
+                        errors.append({'index': idx, 'data': opex_item, 'errors': str(e)})
+                        continue
+
+                    serializer = self.get_serializer(existing, data=resolved_data, partial=True)
+                    if serializer.is_valid():
+                        saved_instance = serializer.save()
+                        print(f"UPDATE: Successfully updated expense ID: {saved_instance.id}")
+                        updated.append(serializer.data)
+                    else:
+                        print(f"UPDATE: Validation failed: {serializer.errors}")
+                        errors.append({'index': idx, 'data': opex_item, 'errors': serializer.errors})
                 except Exception as e:
-                    print(f"🐍 ❌ Exception processing update expense {idx}: {str(e)}")
+                    print(f"UPDATE Exception at {idx}: {e}")
                     import traceback
-                    print(f"🐍 ❌ Full traceback: {traceback.format_exc()}")
-                    errors.append({
-                        'index': idx,
-                        'data': expense_data,
-                        'errors': str(e)
-                    })
+                    print(f"UPDATE Full traceback: {traceback.format_exc()}")
+                    errors.append({'index': idx, 'data': opex_item, 'errors': str(e)})
 
-        print(f"🐍 Update summary: Updated {len(updated_expenses)}, Errors {len(errors)}")
-        
-        response_data = {
-            'updated': len(updated_expenses),
-            'errors': len(errors),
-            'updated_data': updated_expenses
-        }
-
+        print(f"UPDATE Final results: Updated={len(updated)}, Errors={len(errors)}")
+        response_data = {'updated': len(updated), 'errors': len(errors), 'updated_data': updated}
         if errors:
             response_data['error_details'] = errors
-            print(f"🐍 ❌ Update error details: {errors}")
-
         return Response(response_data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['delete'])
     def bulk_delete(self, request):
-        """
-        Handle bulk DELETE operations for sync
-        Expected payload: {"expenses": [expense1, expense2, ...]}
-        """
-        expenses_data = request.data.get('expenses', [])
-        print(f"🐍 Received {len(expenses_data)} expenses for bulk delete")
-        
-        if not expenses_data:
-            return Response(
-                {'error': 'No expenses data provided'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        opex_data = request.data.get('expenses', [])
+        print(f"Received {len(opex_data)} expenses for bulk delete")
+        if not opex_data:
+            return Response({'error': 'No expense data provided'}, status=status.HTTP_400_BAD_REQUEST)
 
-        deleted_count = 0
-        errors = []
-
+        deleted, errors = 0, []
         with transaction.atomic():
-            for idx, expense_data in enumerate(expenses_data):
+            for idx, opex_item in enumerate(opex_data):
                 try:
-                    print(f"🐍 Processing delete expense {idx}: {expense_data}")
+                    print(f"Processing DELETE expense item {idx}: {opex_item}")
                     
-                    # 🆕 RESOLVE DISTRICT CODE TO UUID
-                    district_code = None
-                    if '_composite_key' in expense_data:
-                        district_code = expense_data['_composite_key'].get('district')
+                    # Normalize dates
+                    comp = opex_item.get('_composite_key', {})
+                    if comp and isinstance(comp.get('date'), str) and 'T' in comp['date']:
+                        comp['date'] = comp['date'].split('T')[0]
+                    if isinstance(opex_item.get('date'), str) and 'T' in opex_item['date']:
+                        opex_item['date'] = opex_item['date'].split('T')[0]
+
+                    # Search using district__slug (through FK relationship)
+                    if comp:
+                        search_criteria = {
+                            'district__slug': comp.get('district'),
+                            'date': comp.get('date'),
+                            'purpose': comp.get('purpose', ''),
+                            'payee': comp.get('payee', '')
+                        }
+                        print(f"DELETE: Looking for existing expense with composite key: {search_criteria}")
+                        existing = self.get_queryset().filter(**search_criteria).first()
                     else:
-                        district_code = expense_data.get('district')
-                    
-                    try:
-                        district_obj = District.objects.get(code=district_code)
-                        district_uuid = district_obj.id
-                        print(f"🐍 ✅ Resolved district '{district_code}' to UUID: {district_uuid}")
-                    except District.DoesNotExist:
-                        print(f"🐍 ❌ District not found: {district_code}")
-                        errors.append({
-                            'index': idx,
-                            'data': expense_data,
-                            'errors': f'District code "{district_code}" not found'
-                        })
-                        continue
-                    
-                    # Find existing record using UUID
-                    if '_composite_key' in expense_data:
-                        composite_key = expense_data['_composite_key']
-                        existing = self.get_queryset().filter(
-                            district=district_uuid,  # Use UUID
-                            date=composite_key['date'],
-                            purpose=composite_key['purpose']
-                        ).first()
-                    else:
-                        existing = self.get_queryset().filter(
-                            district=district_uuid,  # Use UUID
-                            date=expense_data.get('date'),
-                            purpose=expense_data.get('purpose')
-                        ).first()
+                        search_criteria = {
+                            'district__slug': opex_item.get('district'),
+                            'date': opex_item.get('date'),
+                            'purpose': opex_item.get('purpose', ''),
+                            'payee': opex_item.get('payee', '')
+                        }
+                        print(f"DELETE: Looking for existing expense with direct fields: {search_criteria}")
+                        existing = self.get_queryset().filter(**search_criteria).first()
+
+                    print(f"DELETE: Found existing record: {existing}")
 
                     if existing:
-                        record_id = existing.id
                         existing.delete()
-                        deleted_count += 1
-                        print(f"🐍 ✅ Deleted record with ID: {record_id}")
+                        print(f"DELETE: Successfully deleted expense")
+                        deleted += 1
                     else:
-                        print(f"🐍 ❌ Record not found for deletion")
-                        errors.append({
-                            'index': idx,
-                            'data': expense_data,
-                            'errors': 'Record not found for deletion'
-                        })
-
+                        print(f"DELETE: Expense not found for deletion")
+                        errors.append({'index': idx, 'data': opex_item, 'errors': 'Expense not found for deletion'})
                 except Exception as e:
-                    print(f"🐍 ❌ Exception processing delete expense {idx}: {str(e)}")
+                    print(f"DELETE Exception at {idx}: {e}")
                     import traceback
-                    print(f"🐍 ❌ Full traceback: {traceback.format_exc()}")
-                    errors.append({
-                        'index': idx,
-                        'data': expense_data,
-                        'errors': str(e)
-                    })
+                    print(f"DELETE Full traceback: {traceback.format_exc()}")
+                    errors.append({'index': idx, 'data': opex_item, 'errors': str(e)})
 
-        print(f"🐍 Delete summary: Deleted {deleted_count}, Errors {len(errors)}")
-        
-        response_data = {
-            'deleted': deleted_count,
-            'errors': len(errors)
-        }
-
+        print(f"DELETE Final results: Deleted={deleted}, Errors={len(errors)}")
+        response_data = {'deleted': deleted, 'errors': len(errors)}
         if errors:
             response_data['error_details'] = errors
-            print(f"🐍 ❌ Delete error details: {errors}")
-
         return Response(response_data, status=status.HTTP_200_OK)
-
+    
 
 class GLBreakdownViewSet(viewsets.ModelViewSet):
     queryset = GLBreakdown.objects.all()
@@ -790,8 +691,8 @@ from decimal import Decimal
 
 from financial.models import Opex
 from commercial.models import MonthlyCommercialSummary
-from common.models import State, BusinessDistrict
-from common.models import BusinessDistrict as District
+from common.models import State
+
 
 class FinancialAllStatesView(APIView):
     def get(self, request):

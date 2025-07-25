@@ -94,6 +94,23 @@ WSGI_APPLICATION = 'raven.wsgi.application'
 import logging
 logger = logging.getLogger(__name__)
 
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'technical.views': {  # Replace with your actual app name
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
 db_name = config('DB_NAME')
 db_user = config('DB_USER')
 db_password = config('DB_PASSWORD')
