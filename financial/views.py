@@ -212,17 +212,36 @@ class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
                         opex_item['date'] = opex_item['date'].split('T')[0]
                     print(f"Date normalized: {original_date} → {opex_item.get('date')}")
 
-                    # Search by district__slug + date + purpose + payee (unique combination)
-                    search_criteria = {
-                        'district__slug': opex_item.get('district'),
-                        'date': opex_item.get('date'),
-                        'purpose': opex_item.get('purpose', ''),
-                        'payee': opex_item.get('payee', '')
-                    }
-                    print(f"Looking for existing expense with: {search_criteria}")
+                    # Smart search strategy:
+                    # 1. First try transaction_id + district + date (MOST SPECIFIC)
+                    # 2. Fall back to composite key search (backward compatibility)
+                    existing = None
                     
-                    existing = self.get_queryset().filter(**search_criteria).first()
-                    print(f"Found existing record: {existing}")
+                    transaction_id = opex_item.get('transaction_id')
+                    if transaction_id:
+                        # Search by transaction_id + district + date for precision
+                        precise_search = {
+                            'transaction_id': transaction_id,
+                            'district__slug': opex_item.get('district'),
+                            'date': opex_item.get('date')
+                        }
+                        print(f"Searching by transaction_id + district + date: {precise_search}")
+                        existing = self.get_queryset().filter(**precise_search).first()
+                        print(f"Found by precise search: {existing}")
+                    
+                    # If not found by precise search, try composite key search
+                    if not existing:
+                        search_criteria = {
+                            'district__slug': opex_item.get('district'),
+                            'date': opex_item.get('date'),
+                            'purpose': opex_item.get('purpose', ''),
+                            'payee': opex_item.get('payee', '')
+                        }
+                        print(f"Searching by composite key: {search_criteria}")
+                        existing = self.get_queryset().filter(**search_criteria).first()
+                        print(f"Found by composite key: {existing}")
+                    
+                    print(f"Final existing record: {existing}")
                     
                     # Resolve all foreign key references
                     try:
@@ -287,33 +306,51 @@ class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
                     if isinstance(opex_item.get('date'), str) and 'T' in opex_item['date']:
                         opex_item['date'] = opex_item['date'].split('T')[0]
 
-                    # Search using district__slug (through FK relationship)
+                    # Smart search for UPDATE:
+                    # 1. First try transaction_id + district + date (MOST SPECIFIC)
+                    # 2. Fall back to composite key search (backward compatibility)
+                    existing = None
+                    
                     if comp:
-                        search_criteria = {
-                            'district__slug': comp.get('district'),
-                            'date': comp.get('date'),
-                            'purpose': comp.get('purpose', ''),
-                            'payee': comp.get('payee', '')
-                        }
-                        print(f"UPDATE: Looking for existing expense with composite key: {search_criteria}")
-                        existing = self.get_queryset().filter(**search_criteria).first()
-                        
-                        # Use composite key data if available
                         data_to_resolve = {**opex_item}
                         data_to_resolve.update(comp)
                         data_to_resolve.pop('_composite_key', None)
                     else:
-                        search_criteria = {
-                            'district__slug': opex_item.get('district'),
-                            'date': opex_item.get('date'),
-                            'purpose': opex_item.get('purpose', ''),
-                            'payee': opex_item.get('payee', '')
-                        }
-                        print(f"UPDATE: Looking for existing expense with direct fields: {search_criteria}")
-                        existing = self.get_queryset().filter(**search_criteria).first()
                         data_to_resolve = opex_item
-
-                    print(f"UPDATE: Found existing record: {existing}")
+                    
+                    transaction_id = data_to_resolve.get('transaction_id')
+                    if transaction_id:
+                        # Search by transaction_id + district + date for precision
+                        precise_search = {
+                            'transaction_id': transaction_id,
+                            'district__slug': data_to_resolve.get('district'),
+                            'date': data_to_resolve.get('date')
+                        }
+                        print(f"UPDATE: Searching by transaction_id + district + date: {precise_search}")
+                        existing = self.get_queryset().filter(**precise_search).first()
+                        print(f"UPDATE: Found by precise search: {existing}")
+                    
+                    # If not found by precise search, try composite key search
+                    if not existing:
+                        if comp:
+                            search_criteria = {
+                                'district__slug': comp.get('district'),
+                                'date': comp.get('date'),
+                                'purpose': comp.get('purpose', ''),
+                                'payee': comp.get('payee', '')
+                            }
+                            print(f"UPDATE: Searching by composite key (comp): {search_criteria}")
+                        else:
+                            search_criteria = {
+                                'district__slug': opex_item.get('district'),
+                                'date': opex_item.get('date'),
+                                'purpose': opex_item.get('purpose', ''),
+                                'payee': opex_item.get('payee', '')
+                            }
+                            print(f"UPDATE: Searching by composite key (direct): {search_criteria}")
+                        
+                        existing = self.get_queryset().filter(**search_criteria).first()
+                        print(f"UPDATE: Found by composite key: {existing}")
 
                     if not existing:
                         print(f"UPDATE: Expense not found for update")
@@ -370,27 +407,43 @@ class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
                     if isinstance(opex_item.get('date'), str) and 'T' in opex_item['date']:
                         opex_item['date'] = opex_item['date'].split('T')[0]
 
-                    # Search using district__slug (through FK relationship)
+                    # Smart search for DELETE:
+                    # 1. First try transaction_id if available (BEST)
+                    # 2. Fall back to composite key search (backward compatibility)
+                    existing = None
+                    
                     if comp:
-                        search_criteria = {
-                            'district__slug': comp.get('district'),
-                            'date': comp.get('date'),
-                            'purpose': comp.get('purpose', ''),
-                            'payee': comp.get('payee', '')
-                        }
-                        print(f"DELETE: Looking for existing expense with composite key: {search_criteria}")
-                        existing = self.get_queryset().filter(**search_criteria).first()
+                        search_data = comp
                     else:
-                        search_criteria = {
-                            'district__slug': opex_item.get('district'),
-                            'date': opex_item.get('date'),
-                            'purpose': opex_item.get('purpose', ''),
-                            'payee': opex_item.get('payee', '')
-                        }
-                        print(f"DELETE: Looking for existing expense with direct fields: {search_criteria}")
+                        search_data = opex_item
+                    
+                    transaction_id = search_data.get('transaction_id')
+                    if transaction_id:
+                        print(f"DELETE: Searching by transaction_id: {transaction_id}")
+                        existing = self.get_queryset().filter(transaction_id=transaction_id).first()
+                        print(f"DELETE: Found by transaction_id: {existing}")
+                    
+                    # If not found by transaction_id, try composite key search
+                    if not existing:
+                        if comp:
+                            search_criteria = {
+                                'district__slug': comp.get('district'),
+                                'date': comp.get('date'),
+                                'purpose': comp.get('purpose', ''),
+                                'payee': comp.get('payee', '')
+                            }
+                            print(f"DELETE: Searching by composite key (comp): {search_criteria}")
+                        else:
+                            search_criteria = {
+                                'district__slug': opex_item.get('district'),
+                                'date': opex_item.get('date'),
+                                'purpose': opex_item.get('purpose', ''),
+                                'payee': opex_item.get('payee', '')
+                            }
+                            print(f"DELETE: Searching by composite key (direct): {search_criteria}")
+                        
                         existing = self.get_queryset().filter(**search_criteria).first()
-
-                    print(f"DELETE: Found existing record: {existing}")
+                        print(f"DELETE: Found by composite key: {existing}")
 
                     if existing:
                         existing.delete()
