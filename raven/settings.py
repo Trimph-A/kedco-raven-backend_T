@@ -90,6 +90,36 @@ WSGI_APPLICATION = 'raven.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
+# Log database configuration values
+import logging
+logger = logging.getLogger(__name__)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'technical.views': {  # Replace with your actual app name
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+db_name = config('DB_NAME')
+db_user = config('DB_USER')
+db_password = config('DB_PASSWORD')
+db_host = config('DB_HOST', default='localhost')
+db_port = config('DB_PORT', default='5432')
+
+logger.info(f"Database configuration - NAME: {db_name}, USER: {db_user}, HOST: {db_host}, PORT: {db_port}")
+logger.info(f"Database PASSWORD: {'*' * len(db_password) if db_password else 'NOT_SET'}")
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
