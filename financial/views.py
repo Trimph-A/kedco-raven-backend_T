@@ -477,6 +477,24 @@ class OpexViewSet(DistrictLocationFilterMixin, viewsets.ModelViewSet):
             response_data['error_details'] = errors
         return Response(response_data, status=status.HTTP_200_OK)
     
+class HQOpexViewSet(viewsets.ModelViewSet):
+    serializer_class = HQOpexSerializer
+    queryset = HQOpex.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['gl_breakdown', 'opex_category', 'date']
+
+    @action(detail=False, methods=['post'], url_path='upsert-external')
+    def upsert_external(self, request):
+        external_id = request.data.get("external_id")
+        if not external_id:
+            return Response({"error": "external_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        instance = HQOpex.objects.filter(external_id=external_id).first()
+        serializer = self.get_serializer(instance, data=request.data, partial=bool(instance))
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK if instance else status.HTTP_201_CREATED)
+
 
 class GLBreakdownViewSet(viewsets.ModelViewSet):
     queryset = GLBreakdown.objects.all()
