@@ -1,3 +1,4 @@
+# financial/models.py
 from django.db import models
 from common.models import UUIDModel, Feeder, BusinessDistrict, DistributionTransformer, Band
 from hr.models import Staff

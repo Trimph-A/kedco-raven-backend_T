@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import (Customer, DailyEnergyDelivered, DailyRevenueCollected,
+from .models import (Customer, DailyEnergyDelivered,
                      MonthlyEnergyBilled, MonthlyRevenueBilled, MonthlyCustomerStats,
                      SalesRepresentative, SalesRepPerformance, DailyCollection,
                      MonthlyCommercialSummary)
@@ -17,11 +17,6 @@ class DailyEnergyDeliveredAdmin(admin.ModelAdmin):
     list_filter = ['date',]
 
 
-@admin.register(DailyRevenueCollected)
-class DailyRevenueCollectedAdmin(admin.ModelAdmin):
-    list_display = ['feeder', 'date', 'amount']
-    list_filter = ['date',]
-
 
 @admin.register(MonthlyEnergyBilled)
 class MonthlyEnergyBilledAdmin(admin.ModelAdmin):
@@ -31,7 +26,7 @@ class MonthlyEnergyBilledAdmin(admin.ModelAdmin):
 
 @admin.register(MonthlyRevenueBilled)
 class MonthlyRevenueBilledAdmin(admin.ModelAdmin):
-    list_display = ['feeder', 'month', 'amount']
+    list_display = ['month', 'amount']
     list_filter = ['month',]
 
 

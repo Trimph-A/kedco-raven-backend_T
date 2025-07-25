@@ -1,27 +1,40 @@
-from rest_framework import viewsets
+# commercial/views.py
+import random
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from datetime import date, datetime
+from dateutil.relativedelta import relativedelta  # type: ignore
+
+from django.db.models import (
+    Sum, F, FloatField, ExpressionWrapper, Q,
+    Case, When, Value, Count, Avg, DurationField
+)
+from django.utils.dateparse import parse_date
+
+from rest_framework import viewsets, status
+from rest_framework.decorators import action, api_view
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from .models import *
 from .serializers import *
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from django.db.models import Sum, F, FloatField, ExpressionWrapper, Q
-from common.models import Feeder, State, BusinessDistrict
-from datetime import datetime
 from .utils import get_filtered_feeders
+
+from common.models import Feeder, State, BusinessDistrict, Band
+from commercial.models import (
+    DailyCollection, MonthlyCommercialSummary, MonthlyEnergyBilled
+)
 from commercial.date_filters import get_date_range_from_request
 from commercial.mixins import FeederFilteredQuerySetMixin
 from commercial.utils import get_filtered_customers
-from commercial.metrics import calculate_derived_metrics, get_sales_rep_performance_summary
-from rest_framework.decorators import api_view
-from decimal import Decimal, InvalidOperation
+from commercial.metrics import (
+    calculate_derived_metrics,
+    get_sales_rep_performance_summary
+)
+from commercial.analytics import get_commercial_overview_data
+
 from technical.models import EnergyDelivered, HourlyLoad, FeederInterruption
 from financial.models import MonthlyRevenueBilled, Opex
-from commercial.models import DailyCollection
-from django.utils.dateparse import parse_date
-from datetime import date
-from dateutil.relativedelta import relativedelta # type: ignore
-from django.db.models import Sum, FloatField, F, ExpressionWrapper, Case, When, Value, Count, Avg
-from django.db.models import DurationField
-import random
+
 
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -65,11 +78,102 @@ class DailyEnergyDeliveredViewSet(FeederFilteredQuerySetMixin, viewsets.ModelVie
         return queryset
 
 
-class DailyRevenueCollectedViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
-    serializer_class = DailyRevenueCollectedSerializer
+class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
+    serializer_class = MonthlyRevenueBilledSerializer
 
     def get_queryset(self):
-        queryset = DailyRevenueCollected.objects.all()
+        queryset = MonthlyRevenueBilled.objects.all()
+        
+        # Custom location filtering for MonthlyRevenueBilled
+        state_name = self.request.GET.get('state')
+        district_name = self.request.GET.get('business_district')
+        feeder_slug = self.request.GET.get('feeder')
+        transformer_slug = self.request.GET.get('transformer')
+
+        if transformer_slug:
+            queryset = queryset.filter(transformer__slug=transformer_slug)
+        elif feeder_slug:
+            queryset = queryset.filter(feeder__slug=feeder_slug)
+        elif district_name:
+            queryset = queryset.filter(feeder__business_district__name__iexact=district_name)
+        elif state_name:
+            queryset = queryset.filter(feeder__business_district__state__name__iexact=state_name)
+
+        # Date filtering
+        month_from, month_to = get_date_range_from_request(self.request, 'month')
+
+        if month_from and month_to:
+            queryset = queryset.filter(month__range=(month_from, month_to))
+        elif month_from:
+            queryset = queryset.filter(month__gte=month_from)
+        elif month_to:
+            queryset = queryset.filter(month__lte=month_to)
+
+        return queryset.select_related(
+            'feeder', 'transformer', 'feeder__business_district',
+            'feeder__business_district__state'
+        )
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get revenue billing summary with aggregations"""
+        queryset = self.get_queryset()
+        
+        # Basic aggregations
+        summary_data = queryset.aggregate(
+            total_amount=Sum('amount'),
+            total_records=Count('id'),
+            avg_amount=Avg('amount')
+        )
+
+        # Group by feeder
+        by_feeder = queryset.values(
+            'feeder__name', 'feeder__slug'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by transformer (if applicable)
+        by_transformer = queryset.filter(
+            transformer__isnull=False
+        ).values(
+            'transformer__name', 'transformer__slug'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by business district
+        by_district = queryset.values(
+            'feeder__business_district__name'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by state
+        by_state = queryset.values(
+            'feeder__business_district__state__name'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        return Response({
+            'summary': summary_data,
+            'by_feeder': by_feeder,
+            'by_transformer': by_transformer,
+            'by_district': by_district,
+            'by_state': by_state
+        })
+    
+
+class DailyCollectionViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
+    serializer_class = DailyCollectionSerializer
+
+    def get_queryset(self):
+        queryset = DailyCollection.objects.all()
         queryset = self.filter_by_location(queryset)
         date_from, date_to = get_date_range_from_request(self.request, 'date')
 
@@ -80,25 +184,71 @@ class DailyRevenueCollectedViewSet(FeederFilteredQuerySetMixin, viewsets.ModelVi
         elif date_to:
             queryset = queryset.filter(date__lte=date_to)
 
-        return queryset
+        # Additional filters
+        collection_type = self.request.GET.get('collection_type')
+        if collection_type:
+            queryset = queryset.filter(collection_type=collection_type)
 
+        vendor_name = self.request.GET.get('vendor_name')
+        if vendor_name:
+            queryset = queryset.filter(vendor_name=vendor_name)
 
-class MonthlyRevenueBilledViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
-    serializer_class = MonthlyRevenueBilledSerializer
+        sales_rep_slug = self.request.GET.get('sales_rep')
+        if sales_rep_slug:
+            queryset = queryset.filter(sales_rep__slug=sales_rep_slug)
 
-    def get_queryset(self):
-        queryset = MonthlyRevenueBilled.objects.all()
-        queryset = self.filter_by_location(queryset)
-        month_from, month_to = get_date_range_from_request(self.request, 'month')
+        transformer_slug = self.request.GET.get('transformer')
+        if transformer_slug:
+            queryset = queryset.filter(transformer__slug=transformer_slug)
 
-        if month_from and month_to:
-            queryset = queryset.filter(month__range=(month_from, month_to))
-        elif month_from:
-            queryset = queryset.filter(month__gte=month_from)
-        elif month_to:
-            queryset = queryset.filter(month__lte=month_to)
+        return queryset.select_related(
+            'sales_rep', 'transformer', 'transformer__feeder', 
+            'transformer__feeder__business_district', 
+            'transformer__feeder__business_district__state'
+        )
 
-        return queryset
+    def perform_create(self, serializer):
+        """Override to add any additional logic during creation"""
+        serializer.save()
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get collection summary with aggregations"""
+        queryset = self.get_queryset()
+        
+        # Basic aggregations
+        summary_data = queryset.aggregate(
+            total_amount=Sum('amount'),
+            total_collections=Count('id'),
+            avg_collection=Avg('amount')
+        )
+
+        # Group by collection type
+        by_type = queryset.values('collection_type').annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by vendor
+        by_vendor = queryset.values('vendor_name').annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        # Group by sales rep
+        by_sales_rep = queryset.values(
+            'sales_rep__name', 'sales_rep__slug'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        ).order_by('-total')
+
+        return Response({
+            'summary': summary_data,
+            'by_collection_type': by_type,
+            'by_vendor': by_vendor,
+            'by_sales_rep': by_sales_rep
+        })
 
 
 class MonthlyEnergyBilledViewSet(FeederFilteredQuerySetMixin, viewsets.ModelViewSet):
@@ -172,10 +322,11 @@ class FeederMetricsView(APIView):
                 date__range=(date_from, date_to)
             ).aggregate(total=Sum('energy_mwh'))['total'] or 0
 
-            revenue_collected = DailyRevenueCollected.objects.filter(
-                feeder=feeder,
-                date__range=(date_from, date_to)
-            ).aggregate(total=Sum('amount'))['total'] or 0
+            # revenue_collected = DailyRevenueCollected.objects.filter(
+            #     feeder=feeder,
+            #     date__range=(date_from, date_to)
+            # ).aggregate(total=Sum('amount'))['total'] or 0
+            revenue_collected=0
 
             revenue_billed = MonthlyRevenueBilled.objects.filter(
                 feeder=feeder,
@@ -269,9 +420,7 @@ class DailyCollectionViewSet(viewsets.ModelViewSet):
         return qs
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from commercial.analytics import get_commercial_overview_data
+
 
 class CommercialOverviewAPIView(APIView):
     def get(self, request):
@@ -982,19 +1131,6 @@ def transformer_metrics_by_feeder_view(request):
     return Response(result)
 
 
-
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from datetime import date
-from dateutil.relativedelta import relativedelta # type: ignore
-from django.db.models import Sum, F
-from commercial.models import MonthlyCommercialSummary
-from common.models import State, BusinessDistrict
-from commercial.models import MonthlyCommercialSummary, MonthlyEnergyBilled
-
-
 class CustomerBusinessMetricsView(APIView):
     def get(self, request):
         year = int(request.GET.get("year"))
@@ -1154,19 +1290,6 @@ class CustomerBusinessMetricsView(APIView):
         
         results.update(energy_data)
         return Response(results, status=status.HTTP_200_OK)
-
-
-
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from datetime import date
-from dateutil.relativedelta import relativedelta # type: ignore
-from django.db.models import Sum
-from decimal import Decimal
-from common.models import Band
-from commercial.models import MonthlyCommercialSummary, MonthlyEnergyBilled
 
 class ServiceBandMetricsView(APIView):
     def get(self, request):
