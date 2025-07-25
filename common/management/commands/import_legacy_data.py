@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from common.models import State, BusinessDistrict, InjectionSubstation, Feeder, Band
-from financial.models import Opex, ExpenseCategory, GLBreakdown
+from financial.models import Opex, OpexCategory, GLBreakdown
 from technical.models import HourlyLoad, FeederInterruption
 from hr.models import Staff, Department, Role
 from django.utils.dateparse import parse_date
@@ -33,12 +33,12 @@ class Command(BaseCommand):
         )
 
         with conn:
-            self.import_states(conn)
-            self.import_districts(conn)
-            self.import_injection_stations(conn)
-            self.import_feeders(conn)
+            # self.import_states(conn)
+            # self.import_districts(conn)
+            # self.import_injection_stations(conn)
+            # self.import_feeders(conn)
             # self.import_feeder_interruptions(conn)
-            # self.import_expenses_with_breakdowns(conn)
+            self.import_expenses_with_breakdowns(conn)
             # self.import_hourly_load(conn)
             # self.import_staff(conn)
             # self.import_distribution_transformers(conn)
@@ -207,7 +207,7 @@ class Command(BaseCommand):
                     breakdown_created += 1
 
                 # Get or create category
-                category, _ = ExpenseCategory.objects.get_or_create(name=category_name or "Uncategorized")
+                category, _ = OpexCategory.objects.get_or_create(name=category_name or "Uncategorized")
 
                 # Create Expense
                 Opex.objects.create(
