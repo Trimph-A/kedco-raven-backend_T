@@ -53,7 +53,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from datetime import date
 from dateutil.relativedelta import relativedelta # type: ignore
-from commercial.models import MonthlyCommercialSummary, DailyRevenueCollected, DailyEnergyDelivered
+from commercial.models import MonthlyCommercialSummary, DailyEnergyDelivered
 from django.db.models import Q
 from .metrics import get_financial_feeder_data
 from commercial.models import SalesRepresentative
@@ -64,7 +64,7 @@ from commercial.serializers import SalesRepresentativeSerializer
 from rest_framework.decorators import action
 from django.db import transaction
 from common.models import BusinessDistrict as District
-=======
+
 from technical.models import (
     FeederEnergyMonthly,
     FeederEnergyDaily,
