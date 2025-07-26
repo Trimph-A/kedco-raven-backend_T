@@ -5,6 +5,7 @@ from .models import (
     OpexCategory,
     GLBreakdown,
     Opex,
+    HQOpex,
     MonthlyRevenueBilled,
     SalaryPayment,
     NBETInvoice,
@@ -27,6 +28,13 @@ class OpexAdmin(admin.ModelAdmin):
     list_display = ['date', 'district', 'opex_category', 'debit', 'credit']
     list_filter = ['opex_category', 'district', 'date']
     search_fields = ['purpose', 'payee', 'gl_account_number']
+
+@admin.register(HQOpex)
+class HQOpexAdmin(admin.ModelAdmin):
+    list_display = ['date', 'opex_category', 'payee', 'credit']
+    search_fields = ['purpose', 'payee', 'gl_account_number']
+    list_filter = ['opex_category', 'gl_breakdown', 'date']
+
 
 @admin.register(MonthlyRevenueBilled)
 class MonthlyRevenueBilledAdmin(admin.ModelAdmin):

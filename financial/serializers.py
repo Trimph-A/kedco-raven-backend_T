@@ -16,6 +16,11 @@ class OpexSerializer(serializers.ModelSerializer):
         model = Opex
         fields = '__all__'
 
+class HQOpexSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HQOpex
+        fields = '__all__'
+
 
 class MonthlyRevenueBilledSerializer(serializers.ModelSerializer):
     class Meta:
