@@ -785,41 +785,100 @@ class Command(BaseCommand):
 
     def import_monthly_commercial_summary(self, conn):
         from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+        from common.models import DistributionTransformer
         from tqdm import tqdm #type: ignore
+        from datetime import datetime
 
         self.stdout.write(self.style.HTTP_INFO("\nImporting Monthly Commercial Summary..."))
-        count = 0
+        created_count = 0
+        updated_count = 0
         skipped = 0
 
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT sales_rep_id, date_recorded, pop, response_rate, billed, payment
+                SELECT sales_rep_id, dt_id, month, pop, response, billed, payment
                 FROM commercial
             """)
             rows = cursor.fetchall()
 
             for row in tqdm(rows, desc="Processing Monthly Commercial Summaries", unit="row"):
-                sales_rep_id = (row.get("sale_rep_id") or "").strip()
+                sales_rep_id = (row.get("sales_rep_id") or "").strip()
+                dt_id = (row.get("dt_id") or "").strip()
+            
+                # Find sales rep by slug
                 sales_rep = SalesRepresentative.objects.filter(slug=sales_rep_id).first()
-
                 if not sales_rep:
                     self.stdout.write(self.style.WARNING(f"Skipping row - Sales Rep not found: {sales_rep_id}"))
                     skipped += 1
                     continue
 
+                # Find transformer by slug
+                transformer = DistributionTransformer.objects.filter(slug=dt_id).first()
+                if not transformer:
+                    self.stdout.write(self.style.WARNING(f"Skipping row - Transformer not found: {dt_id}"))
+                    skipped += 1
+                    continue
+
+                # Validate that sales rep is assigned to this transformer
+                if not sales_rep.assigned_transformers.filter(id=transformer.id).exists():
+                    self.stdout.write(self.style.WARNING(
+                        f"Skipping row - Sales Rep {sales_rep_id} not assigned to transformer {dt_id}"
+                    ))
+                    skipped += 1
+                    continue
+
+                # Parse month - handle datetime format from source database
+                month_value = row.get("month")
+                if month_value:
+                    if isinstance(month_value, str):
+                        # Parse string datetime to date
+                        try:
+                            month_date = datetime.strptime(month_value, "%Y-%m-%d %H:%M:%S").date()
+                        except ValueError:
+                            try:
+                                # Try alternative format if needed
+                                month_date = datetime.strptime(month_value, "%Y-%m-%d").date()
+                            except ValueError:
+                                self.stdout.write(self.style.WARNING(
+                                    f"Skipping row - Invalid month format: {month_value}"
+                                ))
+                                skipped += 1
+                                continue
+                    elif hasattr(month_value, 'date'):
+                        # If it's already a datetime object, extract date
+                        month_date = month_value.date()
+                    else:
+                        # If it's already a date object
+                        month_date = month_value
+                else:
+                    self.stdout.write(self.style.WARNING("Skipping row - Missing month value"))
+                    skipped += 1
+                    continue
+
                 summary, created = MonthlyCommercialSummary.objects.update_or_create(
                     sales_rep=sales_rep,
-                    month=row["date_recorded"],
+                    transformer=transformer,
+                    month=month_date,
                     defaults={
                         "customers_billed": row.get("pop") or 0,
-                        "customers_responded": row.get("response_rate") or 0,
+                        "customers_responded": row.get("response") or 0,
                         "revenue_billed": row.get("billed") or 0,
                         "revenue_collected": row.get("payment") or 0,
                     }
                 )
-                count += int(created)
+            
+                if created:
+                    created_count += 1
+                else:
+                    updated_count += 1
 
-        self.stdout.write(self.style.SUCCESS(
-            f"Monthly Commercial Summary imported: {count} entries. Skipped: {skipped}"
-        ))
+        total_processed = created_count + updated_count
+        self.stdout.write(self.style.SUCCESS(f"\n{'='*60}"))
+        self.stdout.write(self.style.SUCCESS("MONTHLY COMMERCIAL SUMMARY IMPORT COMPLETE"))
+        self.stdout.write(self.style.SUCCESS(f"{'='*60}"))
+        self.stdout.write(self.style.SUCCESS(f"Total rows processed: {total_processed}"))
+        self.stdout.write(self.style.SUCCESS(f"New entries created: {created_count}"))
+        self.stdout.write(self.style.SUCCESS(f"Existing entries updated: {updated_count}"))
+        self.stdout.write(self.style.WARNING(f"Rows skipped: {skipped}"))
+        self.stdout.write(self.style.SUCCESS(f"{'='*60}"))
 
