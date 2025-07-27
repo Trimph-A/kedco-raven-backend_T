@@ -83,13 +83,29 @@ class MonthlyRevenueBilled(UUIDModel, models.Model):
     transformer = models.ForeignKey(DistributionTransformer, on_delete=models.CASCADE)
     month = models.DateField()  # Always use first day of month (e.g., 2025-03-01)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    customers_billed = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of customers billed in this month"
+    )
 
     class Meta:
         unique_together = ('sales_rep', 'transformer', 'month')
         ordering = ['-month', 'sales_rep', 'transformer']
 
     def __str__(self):
-        return f"{self.sales_rep.name} - {self.transformer.name} - {self.month.strftime('%Y-%m')} - ₦{self.amount}"
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.month.strftime('%Y-%m')} - ₦{self.amount} ({self.customers_billed} customers)"
+
+    def average_revenue_per_customer(self):
+        """Calculate average revenue per customer"""
+        if self.customers_billed > 0:
+            return self.amount / self.customers_billed
+        return 0
+
+    @property
+    def revenue_per_customer(self):
+        """Property for easy access to average revenue per customer"""
+        return self.average_revenue_per_customer()
+    
     
 class DailyCollection(UUIDModel, models.Model):
     COLLECTION_TYPE_CHOICES = (
@@ -117,6 +133,10 @@ class DailyCollection(UUIDModel, models.Model):
         choices=VENDOR_CHOICES,
         help_text="Vendor through which collection was made"
     )
+    customers_collected = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of customers who made payments/collections on this date"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -124,7 +144,18 @@ class DailyCollection(UUIDModel, models.Model):
         ordering = ['-date', 'sales_rep', 'transformer']
 
     def __str__(self):
-        return f"{self.sales_rep.name} - {self.transformer.name} - {self.date} - ₦{self.amount}"
+        return f"{self.sales_rep.name} - {self.transformer.name} - {self.date} - ₦{self.amount} ({self.customers_collected} customers)"
+
+    def average_collection_per_customer(self):
+        """Calculate average collection per customer"""
+        if self.customers_collected > 0:
+            return self.amount / self.customers_collected
+        return 0
+
+    @property
+    def collection_per_customer(self):
+        """Property for easy access to average collection per customer"""
+        return self.average_collection_per_customer()
 
 
 class MonthlyCommercialSummary(UUIDModel):
