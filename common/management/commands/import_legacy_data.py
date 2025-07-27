@@ -47,6 +47,11 @@ class Command(BaseCommand):
             # self.import_energy_delivered(conn)
             self.import_monthly_commercial_summary(conn)
 
+            '''Import Distribution Transformers from the Collection Tool, mapping each to its Feeder to their dt
+            also for sales rep I ensureing the many to many relationship is done and dusted!'''
+            # self.import_distribution_transformers_from_collection_tool(conn)
+            self.import_sales_reps_from_collection_tool(conn)
+
 
         self.stdout.write(self.style.SUCCESS('Legacy data imported successfully.'))
 
@@ -690,6 +695,129 @@ class Command(BaseCommand):
         if skipped_links > 0:
             self.stdout.write(self.style.WARNING(f"Skipped assignments: {skipped_links} (missing rep or transformer)"))
         self.stdout.write(self.style.SUCCESS(f"{'='*50}"))
+
+    # distributioin trasfomer importation
+    def import_distribution_transformers_from_collection_tool(self, conn):
+        from common.models import Feeder, DistributionTransformer
+        from tqdm import tqdm
+
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Distribution Transformers from Collection Tool..."))
+
+        count = 0
+        skipped = 0
+        errors = []
+
+        # Preload all feeders into a map {slug: Feeder}
+        feeder_map = {f.slug: f for f in Feeder.objects.all()}
+
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT dt.dt_id, dt.dt_name, dtf.feeder_id
+                FROM distribution_transformers dt
+                JOIN dt_feeder_map dtf ON dt.dt_id = dtf.dt_id
+            """)
+            rows = cursor.fetchall()
+
+            for idx, row in enumerate(tqdm(rows, desc="Processing DTs from Collection Tool", unit="dt")):
+                try:
+                    dt_slug = (row["dt_id"] or "").strip()
+                    dt_name = (row["dt_name"] or "").strip()
+                    feeder_slug = (row["feeder_id"] or "").strip()
+
+                    if not dt_slug or not dt_name or not feeder_slug:
+                        skipped += 1
+                        continue
+
+                    feeder = feeder_map.get(feeder_slug)
+                    if not feeder:
+                        self.stdout.write(self.style.WARNING(
+                            f"Row {idx}: Skipped — Feeder not found for slug '{feeder_slug}'"
+                        ))
+                        skipped += 1
+                        continue
+
+                    # Create DT only if it doesn't already exist by slug
+                    _, created = DistributionTransformer.objects.get_or_create(
+                        slug=dt_slug,
+                        defaults={
+                            "name": dt_name,
+                            "feeder": feeder
+                        }
+                    )
+                    count += int(created)
+
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(
+                        f"Row {idx}: Error importing DT '{row.get('dt_name', '[No Name]')}' — {e}"
+                    ))
+                    skipped += 1
+                    errors.append((idx, str(e)))
+
+        self.stdout.write(self.style.SUCCESS(f"\nDistribution Transformers imported: {count}"))
+        self.stdout.write(self.style.WARNING(f"Skipped: {skipped} rows"))
+
+        if errors:
+            self.stdout.write(self.style.NOTICE("First 5 errors:"))
+            for idx, err in errors[:5]:
+                self.stdout.write(f"  - Row {idx}: {err}")
+
+    
+    # new import for slaes_rep and MTOM mapping
+    def import_sales_reps_from_collection_tool(self, conn):
+        from commercial.models import SalesRepresentative
+        from common.models import DistributionTransformer
+        from tqdm import tqdm
+
+        self.stdout.write(self.style.HTTP_INFO("\nImporting Sales Representatives from Collection Tool..."))
+
+        created_count = 0
+        linked_count = 0
+        skipped = 0
+
+        with conn.cursor() as cursor:
+            # Step 1: Fetch all sales reps from master table
+            cursor.execute("SELECT sales_rep_id, sales_rep_name FROM sales_reps")
+            reps = cursor.fetchall()
+
+            for row in tqdm(reps, desc="Creating Sales Reps", unit="rep"):
+                slug = parse_nullable(row.get("sales_rep_id"), "").strip()
+                name = parse_nullable(row.get("sales_rep_name"), "").strip()
+
+                if not slug or not name:
+                    self.stdout.write(self.style.WARNING("Skipping row with missing ID or name."))
+                    continue
+
+                rep, created = SalesRepresentative.objects.get_or_create(
+                    slug=slug,
+                    defaults={"name": name}
+                )
+                created_count += int(created)
+
+            # Step 2: Assign transformers from junction table
+            cursor.execute("SELECT sales_rep_id, dt_id FROM sales_rep_dt")
+            assignments = cursor.fetchall()
+
+            for row in tqdm(assignments, desc="Linking Sales Reps to Transformers", unit="link"):
+                rep_slug = parse_nullable(row.get("sales_rep_id"), "").strip()
+                dt_slug = parse_nullable(row.get("dt_id"), "").strip()
+
+                rep = SalesRepresentative.objects.filter(slug=rep_slug).first()
+                transformer = DistributionTransformer.objects.filter(slug=dt_slug).first()
+
+                if not rep or not transformer:
+                    self.stdout.write(self.style.WARNING(
+                        f"Could not assign transformer {dt_slug} to rep {rep_slug} — missing entity."
+                    ))
+                    skipped += 1
+                    continue
+
+                rep.assigned_transformers.add(transformer)
+                linked_count += 1
+
+        # Summary
+        self.stdout.write(self.style.SUCCESS(f"\nSales Reps created: {created_count}"))
+        self.stdout.write(self.style.SUCCESS(f"Transformer links established: {linked_count}"))
+        self.stdout.write(self.style.WARNING(f"Skipped links: {skipped} (missing rep or transformer)"))
 
 
 
