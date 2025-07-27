@@ -24,7 +24,7 @@ from django.db.models import Q
 from django.utils.dateparse import parse_datetime
 from datetime import timedelta
 from django.http import Http404
-import pytz
+import pytz # type: ignore
 
 
 

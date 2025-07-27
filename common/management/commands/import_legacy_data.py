@@ -45,7 +45,7 @@ class Command(BaseCommand):
             # self.import_sales_reps(conn)
             # self.import_daily_collections(conn)
             # self.import_energy_delivered(conn)
-            # self.import_monthly_commercial_summary(conn)
+            self.import_monthly_commercial_summary(conn)
 
             '''Import Distribution Transformers from the Collection Tool, mapping each to its Feeder to their dt
             also for sales rep I ensureing the many to many relationship is done and dusted!'''
@@ -605,52 +605,96 @@ class Command(BaseCommand):
 
         created_count = 0
         linked_count = 0
-        skipped = 0
+        skipped_reps = 0
+        skipped_links = 0
 
         with conn.cursor() as cursor:
-            # Step 1: Fetch all distinct sales reps
-            cursor.execute("SELECT DISTINCT sale_rep_id, sales_rep_name FROM sales_reps")
+            # Step 1: Import Sales Representatives from sales_reps table
+            self.stdout.write(self.style.HTTP_INFO("Step 1: Creating Sales Representatives..."))
+        
+            cursor.execute("SELECT sales_rep_id, sales_rep_name FROM sales_reps")
             reps = cursor.fetchall()
 
             for row in tqdm(reps, desc="Creating Sales Reps", unit="rep"):
-                slug = parse_nullable(row.get("sale_rep_id"), "").strip()
-                name = parse_nullable(row.get("sales_rep_name"), "").strip()
+                rep_id = parse_nullable(row.get("sales_rep_id"), "").strip()
+                rep_name = parse_nullable(row.get("sales_rep_name"), "").strip()
 
-                if not slug or not name:
-                    self.stdout.write(self.style.WARNING("Skipping row with missing ID or name."))
+                if not rep_id or not rep_name:
+                    self.stdout.write(self.style.WARNING(
+                        f"Skipping sales rep with missing ID ({rep_id}) or name ({rep_name})"
+                    ))
+                    skipped_reps += 1
                     continue
 
+                # Create or get the sales representative
                 rep, created = SalesRepresentative.objects.get_or_create(
-                    slug=slug,
-                    defaults={"name": name}
+                    slug=rep_id,  # sales_rep_id becomes the slug
+                    defaults={"name": rep_name}
                 )
-                created_count += int(created)
+            
+                if created:
+                    created_count += 1
+                else:
+                    # Update name if it changed
+                    if rep.name != rep_name:
+                        rep.name = rep_name
+                        rep.save()
 
-            # Step 2: Assign transformers
-            cursor.execute("SELECT sale_rep_id, dt_id FROM sales_reps")
+            # Step 2: Assign transformers from sales_rep_dt table
+            self.stdout.write(self.style.HTTP_INFO("Step 2: Linking Sales Reps to Transformers..."))
+        
+            cursor.execute("SELECT sales_rep_id, dt_id FROM sales_rep_dt")
             assignments = cursor.fetchall()
 
+            # Clear all existing assignments first (optional - remove if you want to preserve existing)
+            # SalesRepresentative.objects.all().update(assigned_transformers=None)
+
             for row in tqdm(assignments, desc="Linking Sales Reps to Transformers", unit="link"):
-                rep_slug = parse_nullable(row.get("sale_rep_id"), "").strip()
-                dt_slug = parse_nullable(row.get("dt_id"), "").strip()
+                rep_id = parse_nullable(row.get("sales_rep_id"), "").strip()
+                dt_id = parse_nullable(row.get("dt_id"), "").strip()
 
-                rep = SalesRepresentative.objects.filter(slug=rep_slug).first()
-                transformer = DistributionTransformer.objects.filter(slug=dt_slug).first()
-
-                if not rep or not transformer:
+                if not rep_id or not dt_id:
                     self.stdout.write(self.style.WARNING(
-                        f"Could not assign transformer {dt_slug} to rep {rep_slug} — missing entity."
+                        f"Skipping assignment with missing rep_id ({rep_id}) or dt_id ({dt_id})"
                     ))
-                    skipped += 1
+                    skipped_links += 1
                     continue
 
+                # Find the sales rep by slug (which is the sales_rep_id)
+                try:
+                    rep = SalesRepresentative.objects.get(slug=rep_id)
+                except SalesRepresentative.DoesNotExist:
+                    self.stdout.write(self.style.WARNING(
+                        f"Sales rep with ID {rep_id} not found - skipping transformer assignment for {dt_id}"
+                    ))
+                    skipped_links += 1
+                    continue
+
+                # Find the transformer by slug (which is the dt_id)
+                try:
+                    transformer = DistributionTransformer.objects.get(slug=dt_id)
+                except DistributionTransformer.DoesNotExist:
+                    self.stdout.write(self.style.WARNING(
+                        f"Transformer with ID {dt_id} not found - skipping assignment to rep {rep_id}"
+                    ))
+                    skipped_links += 1
+                    continue
+
+                # Add the transformer to the sales rep's assigned transformers
                 rep.assigned_transformers.add(transformer)
                 linked_count += 1
 
         # Summary
-        self.stdout.write(self.style.SUCCESS(f"\nSales Reps created: {created_count}"))
-        self.stdout.write(self.style.SUCCESS(f"Transformer links established: {linked_count}"))
-        self.stdout.write(self.style.WARNING(f"Skipped links: {skipped} (missing rep or transformer)"))
+        self.stdout.write(self.style.SUCCESS(f"\n{'='*50}"))
+        self.stdout.write(self.style.SUCCESS("IMPORT SUMMARY"))
+        self.stdout.write(self.style.SUCCESS(f"{'='*50}"))
+        self.stdout.write(self.style.SUCCESS(f"Sales Reps created: {created_count}"))
+        self.stdout.write(self.style.SUCCESS(f"Transformer assignments created: {linked_count}"))
+        if skipped_reps > 0:
+            self.stdout.write(self.style.WARNING(f"Skipped sales reps: {skipped_reps} (missing data)"))
+        if skipped_links > 0:
+            self.stdout.write(self.style.WARNING(f"Skipped assignments: {skipped_links} (missing rep or transformer)"))
+        self.stdout.write(self.style.SUCCESS(f"{'='*50}"))
 
     # distributioin trasfomer importation
     def import_distribution_transformers_from_collection_tool(self, conn):
@@ -869,41 +913,100 @@ class Command(BaseCommand):
 
     def import_monthly_commercial_summary(self, conn):
         from commercial.models import MonthlyCommercialSummary, SalesRepresentative
+        from common.models import DistributionTransformer
         from tqdm import tqdm #type: ignore
+        from datetime import datetime
 
         self.stdout.write(self.style.HTTP_INFO("\nImporting Monthly Commercial Summary..."))
-        count = 0
+        created_count = 0
+        updated_count = 0
         skipped = 0
 
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT sale_rep_id, date_recorded, pop, response_rate, billed, payment
+                SELECT sales_rep_id, dt_id, month, pop, response, billed, payment
                 FROM commercial
             """)
             rows = cursor.fetchall()
 
             for row in tqdm(rows, desc="Processing Monthly Commercial Summaries", unit="row"):
-                sales_rep_id = (row.get("sale_rep_id") or "").strip()
+                sales_rep_id = (row.get("sales_rep_id") or "").strip()
+                dt_id = (row.get("dt_id") or "").strip()
+            
+                # Find sales rep by slug
                 sales_rep = SalesRepresentative.objects.filter(slug=sales_rep_id).first()
-
                 if not sales_rep:
                     self.stdout.write(self.style.WARNING(f"Skipping row - Sales Rep not found: {sales_rep_id}"))
                     skipped += 1
                     continue
 
+                # Find transformer by slug
+                transformer = DistributionTransformer.objects.filter(slug=dt_id).first()
+                if not transformer:
+                    self.stdout.write(self.style.WARNING(f"Skipping row - Transformer not found: {dt_id}"))
+                    skipped += 1
+                    continue
+
+                # Validate that sales rep is assigned to this transformer
+                if not sales_rep.assigned_transformers.filter(id=transformer.id).exists():
+                    self.stdout.write(self.style.WARNING(
+                        f"Skipping row - Sales Rep {sales_rep_id} not assigned to transformer {dt_id}"
+                    ))
+                    skipped += 1
+                    continue
+
+                # Parse month - handle datetime format from source database
+                month_value = row.get("month")
+                if month_value:
+                    if isinstance(month_value, str):
+                        # Parse string datetime to date
+                        try:
+                            month_date = datetime.strptime(month_value, "%Y-%m-%d %H:%M:%S").date()
+                        except ValueError:
+                            try:
+                                # Try alternative format if needed
+                                month_date = datetime.strptime(month_value, "%Y-%m-%d").date()
+                            except ValueError:
+                                self.stdout.write(self.style.WARNING(
+                                    f"Skipping row - Invalid month format: {month_value}"
+                                ))
+                                skipped += 1
+                                continue
+                    elif hasattr(month_value, 'date'):
+                        # If it's already a datetime object, extract date
+                        month_date = month_value.date()
+                    else:
+                        # If it's already a date object
+                        month_date = month_value
+                else:
+                    self.stdout.write(self.style.WARNING("Skipping row - Missing month value"))
+                    skipped += 1
+                    continue
+
                 summary, created = MonthlyCommercialSummary.objects.update_or_create(
                     sales_rep=sales_rep,
-                    month=row["date_recorded"],
+                    transformer=transformer,
+                    month=month_date,
                     defaults={
                         "customers_billed": row.get("pop") or 0,
-                        "customers_responded": row.get("response_rate") or 0,
+                        "customers_responded": row.get("response") or 0,
                         "revenue_billed": row.get("billed") or 0,
                         "revenue_collected": row.get("payment") or 0,
                     }
                 )
-                count += int(created)
+            
+                if created:
+                    created_count += 1
+                else:
+                    updated_count += 1
 
-        self.stdout.write(self.style.SUCCESS(
-            f"Monthly Commercial Summary imported: {count} entries. Skipped: {skipped}"
-        ))
+        total_processed = created_count + updated_count
+        self.stdout.write(self.style.SUCCESS(f"\n{'='*60}"))
+        self.stdout.write(self.style.SUCCESS("MONTHLY COMMERCIAL SUMMARY IMPORT COMPLETE"))
+        self.stdout.write(self.style.SUCCESS(f"{'='*60}"))
+        self.stdout.write(self.style.SUCCESS(f"Total rows processed: {total_processed}"))
+        self.stdout.write(self.style.SUCCESS(f"New entries created: {created_count}"))
+        self.stdout.write(self.style.SUCCESS(f"Existing entries updated: {updated_count}"))
+        self.stdout.write(self.style.WARNING(f"Rows skipped: {skipped}"))
+        self.stdout.write(self.style.SUCCESS(f"{'='*60}"))
 

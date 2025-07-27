@@ -32,7 +32,7 @@ from commercial.metrics import (
 from commercial.analytics import get_commercial_overview_data
 
 from technical.models import EnergyDelivered, HourlyLoad, FeederInterruption
-from financial.models import MonthlyRevenueBilled, Opex
+from financial.models import MonthlyRevenueBilled, Opex, SalaryPayment, NBETInvoice, MOInvoice
 
 
 
@@ -806,12 +806,11 @@ def feeder_metrics(request):
 
 
 
-from django.views.decorators.cache import cache_page
-from django.utils.decorators import method_decorator
+# from django.views.decorators.cache import cache_page
+# from django.utils.decorators import method_decorator
 
-DEFAULT_TARIFF_PER_MWH = Decimal("50000")
 
-@method_decorator(cache_page(60 * 5), name='dispatch')
+# # @method_decorator(cache_page(60 * 5), name='dispatch')
 class OverviewAPIView(APIView):
     def get(self, request):
         try:
@@ -839,105 +838,165 @@ class OverviewAPIView(APIView):
         overview_data = []
 
         for m in months:
+            # Commercial data aggregation
             comm = MonthlyCommercialSummary.objects.filter(month=m).aggregate(
                 revenue_billed=Sum("revenue_billed"),
                 revenue_collected=Sum("revenue_collected"),
                 customers_billed=Sum("customers_billed"),
                 customers_responded=Sum("customers_responded"),
             )
-            tech = EnergyDelivered.objects.filter(date__year=m.year, date__month=m.month).aggregate(
+            
+            # Energy data aggregation
+            energy_delivered = EnergyDelivered.objects.filter(
+                date__year=m.year, 
+                date__month=m.month
+            ).aggregate(energy=Sum("energy_mwh"))["energy"] or Decimal("0")
+            
+            energy_billed = MonthlyEnergyBilled.objects.filter(month=m).aggregate(
                 energy=Sum("energy_mwh")
-            )
-            billed_energy = MonthlyEnergyBilled.objects.filter(month=m).aggregate(
-                energy=Sum("energy_mwh")
-            )
-            cost = Opex.objects.filter(date__year=m.year, date__month=m.month).aggregate(
-                credit=Sum("credit")
-            )
+            )["energy"] or Decimal("0")
 
-            loads = HourlyLoad.objects.filter(date__year=m.year, date__month=m.month).values('date').annotate(
-                count=Count('id')
+            # Extract commercial values first
+            revenue_billed = comm['revenue_billed'] or Decimal("0")
+            revenue_collected = comm['revenue_collected'] or Decimal("0")
+            customers_billed = comm['customers_billed'] or 0
+            customers_responded = comm['customers_responded'] or 0
+            
+            # Financial data - include all cost components
+            opex_costs = Opex.objects.filter(
+                date__year=m.year, 
+                date__month=m.month
+            ).aggregate(
+                total_opex=Sum("credit") + Sum("debit")
+            )["total_opex"] or Decimal("0")
+            
+            # Add other cost components - ensure proper date filtering
+            salary_costs = SalaryPayment.objects.filter(
+                month__year=m.year,
+                month__month=m.month
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            
+            nbet_costs = NBETInvoice.objects.filter(
+                month__year=m.year,
+                month__month=m.month
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            
+            mo_costs = MOInvoice.objects.filter(
+                month__year=m.year,
+                month__month=m.month
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            
+            total_cost = opex_costs + salary_costs + nbet_costs + mo_costs
+            
+            # Check if we have any actual operational data for this month
+            has_operational_data = (
+                energy_delivered > 0 or 
+                revenue_billed > 0 or 
+                customers_billed > 0
             )
-            # hours_supplied = sum([entry['count'] for entry in loads]) / len(loads) if loads else 0
+            
+            # If no operational data exists, you might want to set total_cost to 0
+            # or handle it differently based on business logic
+            if not has_operational_data and total_cost == 0:
+                # This month truly has no data
+                total_cost = Decimal("0")
 
-            hours_supplied = (
-                loads.filter(load_mw__gt=0)
-                .values('feeder', 'date')
-                .annotate(hours=Count('hour', distinct=True))
+            # Technical metrics - improved calculation
+            # Calculate average hours of supply more accurately
+            hourly_loads = HourlyLoad.objects.filter(
+                date__year=m.year, 
+                date__month=m.month,
+                load_mw__gt=0  # Only count hours with actual load
+            ).values('feeder', 'date').annotate(
+                daily_hours=Count('hour')
             )
-
-            if hours_supplied:
-                avg_hours_supply = sum(entry['hours'] for entry in hours_supplied) / len(hours_supplied)
+            
+            if hourly_loads.exists():
+                avg_hours_supply = hourly_loads.aggregate(
+                    avg=Avg('daily_hours')
+                )["avg"] or 0
             else:
-                avg_hours_supply = 0 
+                avg_hours_supply = 0
 
-            # interruptions = FeederInterruption.objects.filter(
-            #     occurred_at__year=m.year, occurred_at__month=m.month,
-            #     restored_at__isnull=False
-            # ).annotate(
-            #     duration=ExpressionWrapper(F('restored_at') - F('occurred_at'), output_field=DurationField())
-            # )
+            # Calculate interruption metrics properly
+            interruptions = FeederInterruption.objects.filter(
+                occurred_at__year=m.year, 
+                occurred_at__month=m.month,
+                restored_at__isnull=False
+            )
+            
+            if interruptions.exists():
+                total_duration = sum(
+                    (interrupt.restored_at - interrupt.occurred_at).total_seconds() / 3600 
+                    for interrupt in interruptions
+                )
+                avg_interruption_duration = total_duration / interruptions.count()
+                avg_turnaround_time = avg_interruption_duration  # Same as interruption duration
+            else:
+                avg_interruption_duration = 0
+                avg_turnaround_time = 0
 
-            # avg_duration = interruptions.aggregate(avg=Avg('duration'))['avg']
-            # avg_duration_hours = avg_duration.total_seconds() / 3600 if avg_duration else 0
-
-            # avg_turnaround = interruptions.aggregate(avg=Avg('duration'))['avg']
-            # avg_turnaround_hours = avg_turnaround.total_seconds() / 3600 if avg_turnaround else 0
-
-            billing_eff = (billed_energy['energy'] / tech['energy']) if tech['energy'] and billed_energy['energy'] else 0
-            collection_eff = (comm['revenue_collected'] / comm['revenue_billed']) if comm['revenue_billed'] else 0
-            atcc = 1 - (billing_eff * collection_eff)
-            energy_collected = comm['revenue_collected'] / DEFAULT_TARIFF_PER_MWH if comm['revenue_collected'] else 0
+            # Calculate efficiency metrics without tariff
+            # Billing efficiency = Energy Billed / Energy Delivered
+            billing_eff = (energy_billed / energy_delivered) if energy_delivered > 0 else Decimal("0")
+            
+            # Collection efficiency = Revenue Collected / Revenue Billed
+            collection_eff = (revenue_collected / revenue_billed) if revenue_billed > 0 else Decimal("0")
+            
+            # AT&C Losses = 100% - (Billing Efficiency × Collection Efficiency)
+            atc_losses = Decimal("1") - (billing_eff * collection_eff)
+            
+            # Energy collected = Energy Delivered × Collection Efficiency
+            # This represents the energy equivalent of what was actually collected
+            energy_collected = energy_delivered * collection_eff
+            
+            # Customer response rate
+            customer_response_rate = (customers_responded / customers_billed * 100) if customers_billed > 0 else 0
 
             overview_data.append({
                 "month": m.strftime("%b"),
-                "billing_efficiency": round(billing_eff * 100, 2),
-                "collection_efficiency": round(collection_eff * 100, 2),
-                "atcc": round(atcc * 100, 2),
-                "revenue_billed": comm['revenue_billed'] or 0,
-                "revenue_collected": comm['revenue_collected'] or 0,
-                "energy_billed": billed_energy['energy'] or 0,
-                "energy_delivered": tech['energy'] or 0,
-                "energy_collected": round(energy_collected, 2),
-                "customer_response_rate": round((comm['customers_responded'] / comm['customers_billed']) * 100, 2) if comm['customers_billed'] else 0,
-                "total_cost": cost['credit'] or 0,
+                "billing_efficiency": float(round(billing_eff * 100, 2)),
+                "collection_efficiency": float(round(collection_eff * 100, 2)),
+                "atcc": float(round(atc_losses * 100, 2)),  # AT&C losses as percentage
+                "revenue_billed": float(revenue_billed),
+                "revenue_collected": float(revenue_collected),
+                "energy_billed": float(energy_billed),
+                "energy_delivered": float(energy_delivered),
+                "energy_collected": float(round(energy_collected, 2)),
+                "customer_response_rate": round(customer_response_rate, 2),
+                "total_cost": float(total_cost),
                 "avg_hours_supply": round(avg_hours_supply, 2),
-                # "avg_interruption_duration": round(avg_duration_hours, 2),
-                # "avg_turnaround_time": round(avg_turnaround_hours, 2),
-                "avg_interruption_duration": round(24 - avg_hours_supply, 2),
-                "avg_turnaround_time": round(24 - avg_hours_supply, 2),
+                "avg_interruption_duration": round(avg_interruption_duration, 2),
+                "avg_turnaround_time": round(avg_turnaround_time, 2),
             })
 
-        current = overview_data[-1]
+        # Calculate deltas for current month vs previous month
+        current = overview_data[-1] if overview_data else {}
         previous = overview_data[-2] if len(overview_data) > 1 else {}
 
-        def delta(metric):
-            if metric in current and metric in previous and previous[metric]:
+        def calculate_delta(metric):
+            """Calculate percentage change between current and previous values"""
+            if (metric in current and metric in previous and 
+                previous[metric] is not None and previous[metric] != 0):
                 return round(((current[metric] - previous[metric]) / previous[metric]) * 100, 2)
             return None
 
-        for metric in [
-            "atcc",
-            "billing_efficiency",
-            "collection_efficiency",
-            "revenue_billed",
-            "revenue_collected",
-            "energy_billed",
-            "energy_delivered",
-            "total_cost",
-            "energy_collected",
-            "customer_response_rate",
-            "avg_hours_supply",
-            "avg_interruption_duration",
-            "avg_turnaround_time"
-        ]:
-            current[f"delta_{metric}"] = delta(metric)
+        # Add delta calculations for all metrics
+        metrics_to_track = [
+            "atcc", "billing_efficiency", "collection_efficiency",
+            "revenue_billed", "revenue_collected", "energy_billed", 
+            "energy_delivered", "total_cost", "energy_collected",
+            "customer_response_rate", "avg_hours_supply",
+            "avg_interruption_duration", "avg_turnaround_time"
+        ]
+
+        for metric in metrics_to_track:
+            current[f"delta_{metric}"] = calculate_delta(metric)
 
         return Response({
             "current": current,
-            "history": overview_data[:-1]
+            "history": overview_data[:-1]  # All months except current
         })
-    
 
 
 def calculate_atcc_metrics(feeder, start_date, end_date):
