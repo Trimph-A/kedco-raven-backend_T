@@ -33,7 +33,8 @@ from commercial.metrics import (
 from commercial.analytics import get_commercial_overview_data
 
 from technical.models import EnergyDelivered, HourlyLoad, FeederInterruption
-from financial.models import MonthlyRevenueBilled, Opex, SalaryPayment, NBETInvoice, MOInvoice
+from financial.models import Opex, SalaryPayment, NBETInvoice, MOInvoice
+from commercial.models import MonthlyRevenueBilled
 
 from django.db import transaction
 from rest_framework import viewsets, status
@@ -360,6 +361,11 @@ class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
     def bulk_create(self, request):
         # """Test endpoint to verify URL routing works"""
         # return Response({'message': 'URL routing works!', 'viewset': 'MonthlyRevenueBilledViewSet'})
+
+        model = self.get_queryset().model
+        print(f"🔍 Using model: {model}")
+        print(f"🔍 Model fields: {[f.name for f in model._meta.fields]}")
+        print(f"🔍 Model path: {model.__module__}.{model.__name__}")
 
         revenue_data = request.data.get('revenues', [])
         print(f"Received {len(revenue_data)} revenue records for bulk create")
