@@ -358,8 +358,8 @@ class MonthlyRevenueBilledViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='bulk_create')
     def bulk_create(self, request):
-        """Test endpoint to verify URL routing works"""
-        return Response({'message': 'URL routing works!', 'viewset': 'MonthlyRevenueBilledViewSet'})
+        # """Test endpoint to verify URL routing works"""
+        # return Response({'message': 'URL routing works!', 'viewset': 'MonthlyRevenueBilledViewSet'})
 
         revenue_data = request.data.get('revenues', [])
         print(f"Received {len(revenue_data)} revenue records for bulk create")
