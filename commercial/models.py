@@ -69,6 +69,7 @@ class SalesRepresentative(UUIDModel, models.Model):
 
 class SalesRepPerformance(UUIDModel, models.Model):
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
+    transformer = models.ForeignKey(DistributionTransformer, on_delete=models.SET_NULL, null=True, blank=True)  # ADD THIS LINE
     month = models.DateField()
     outstanding_billed = models.DecimalField(max_digits=15, decimal_places=2)
     current_billed = models.DecimalField(max_digits=15, decimal_places=2)
@@ -77,6 +78,7 @@ class SalesRepPerformance(UUIDModel, models.Model):
     collections_on_outstanding = models.DecimalField(max_digits=15, decimal_places=2)
     active_accounts = models.PositiveIntegerField()
     suspended_accounts = models.PositiveIntegerField()
+    external_id = models.CharField(max_length=50, null=True, blank=True, help_text="ID from collection tool")  # ADD THIS LINE
 
 class MonthlyRevenueBilled(UUIDModel, models.Model):
     sales_rep = models.ForeignKey(SalesRepresentative, on_delete=models.CASCADE)
@@ -87,6 +89,7 @@ class MonthlyRevenueBilled(UUIDModel, models.Model):
         default=0,
         help_text="Number of customers billed in this month"
     )
+    external_id = models.CharField(max_length=50, null=True, blank=True, help_text="ID from collection tool")  # ADD THIS LINE
 
     class Meta:
         unique_together = ('sales_rep', 'transformer', 'month')
@@ -137,6 +140,7 @@ class DailyCollection(UUIDModel, models.Model):
         default=0,
         help_text="Number of customers who made payments/collections on this date"
     )
+    external_id = models.CharField(max_length=50, null=True, blank=True, help_text="ID from collection tool")  # ADD THIS LINE
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
