@@ -64,7 +64,7 @@ from financial.views import (
     OpexCategoryViewSet,
     OpexViewSet,
     HQOpexViewSet,
-    MonthlyRevenueBilledViewSet,
+    # MonthlyRevenueBilledViewSet,
     FinancialSummaryView,
     SalaryPaymentViewSet,
     financial_overview_view,
@@ -92,11 +92,6 @@ from regulatory.views import (
 from hr.views import DepartmentViewSet, RoleViewSet, StaffViewSet
 from hr.views import StaffSummaryView
 
-
-
-
-
-
 router = DefaultRouter()
 router.register(r'states', StateViewSet)
 router.register(r'districts', BusinessDistrictViewSet)
@@ -107,11 +102,9 @@ router.register(r'bands', BandViewSet)
 
 router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'daily-energy-delivered', DailyEnergyDeliveredViewSet, basename='daily-energy-delivered')
-router.register(r'monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
-router.register(r'daily-collections', DailyCollectionViewSet, basename='daily-collections')
+
 router.register(r'monthly-energy-billed', MonthlyEnergyBilledViewSet, basename='monthly-energy-billed')
 router.register(r'monthly-customer-stats', MonthlyCustomerStatsViewSet, basename='monthly-customer-stats')
-
 
 router.register(r'technical/energy-delivered', EnergyDeliveredViewSet, basename='energy-delivered')
 router.register(r'technical/hourly-load', HourlyLoadViewSet, basename='hourly-load')
@@ -130,6 +123,9 @@ router.register(r'financial/hq/expenses', HQOpexViewSet, basename='hq-expense')
 router.register(r'commercial/sales-reps', SalesRepresentativeViewSet, basename='sales-representative')
 router.register(r'commercial/sales-rep-performance', SalesRepPerformanceViewSet, basename='sales-rep-performance')
 router.register(r'commercial/collections', DailyCollectionViewSet, basename='daily-collection')
+# added this under commercial
+router.register(r'commercial/monthly-revenue-billed', MonthlyRevenueBilledViewSet, basename='monthly-revenue-billed')
+router.register(r'commercial/daily-collections', DailyCollectionViewSet, basename='daily-collections')
 
 
 router.register(r'regulatory/energy-offtake', MonthlyEnergyOfftakeViewSet, basename='reg-energy-offtake')
@@ -165,9 +161,6 @@ urlpatterns = [
     path("api/metrics/commercial/business-metrics/", CustomerBusinessMetricsView.as_view(), name="customer-business-metrics"),
     path("api/metrics/commercial/service-band-metrics/", ServiceBandMetricsView.as_view(), name="service-band-metrics"),
     path("api/metrics/commercial/transformers-metrics/", transformer_metrics_by_feeder_view),
-
-
-
 
 
     path("api/metrics/feeders/performance/", feeder_performance_view, name="feeder-performance"),
