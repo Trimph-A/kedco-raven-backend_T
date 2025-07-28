@@ -64,7 +64,7 @@ from financial.views import (
     OpexCategoryViewSet,
     OpexViewSet,
     HQOpexViewSet,
-    MonthlyRevenueBilledViewSet,
+    # MonthlyRevenueBilledViewSet,
     FinancialSummaryView,
     SalaryPaymentViewSet,
     financial_overview_view,
